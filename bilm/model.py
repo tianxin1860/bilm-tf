@@ -14,11 +14,13 @@ DTYPE_INT = 'int64'
 class BidirectionalLanguageModel(object):
     def __init__(
             self,
-            options_file: str,
-            weight_file: str,
+            # options_file: str,
+            # weight_file: str,
+            options_file,
+            weight_file,
             use_character_inputs=True,
             embedding_weight_file=None,
-            max_batch_size=128,
+            max_batch_size=1024,
         ):
         '''
         Creates the language model computational graph and loads weights
@@ -249,7 +251,7 @@ class BidirectionalLanguageModelGraph(object):
     '''
     def __init__(self, options, weight_file, ids_placeholder,
                  use_character_inputs=True, embedding_weight_file=None,
-                 max_batch_size=128):
+                 max_batch_size=1024):
 
         self.options = options
         self._max_batch_size = max_batch_size
@@ -287,10 +289,10 @@ class BidirectionalLanguageModelGraph(object):
         '''
         options contains key 'char_cnn': {
 
-        'n_characters': 262,
+        'n_characters': 60,
 
         # includes the start / end characters
-        'max_characters_per_token': 50,
+        'max_characters_per_token': 17,
 
         'filters': [
             [1, 32],
@@ -319,10 +321,6 @@ class BidirectionalLanguageModelGraph(object):
         max_chars = cnn_options['max_characters_per_token']
         char_embed_dim = cnn_options['embedding']['dim']
         n_chars = cnn_options['n_characters']
-        if n_chars != 262:
-            raise InvalidNumberOfCharacters(
-                "Set n_characters=262 after training see the README.md"
-            )
         if cnn_options['activation'] == 'tanh':
             activation = tf.nn.tanh
         elif cnn_options['activation'] == 'relu':

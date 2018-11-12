@@ -103,3 +103,4 @@ with tf.Session() as sess:
                    question_token_ids: question_ids}
     )
 
+print(str(elmo_context_input_))
