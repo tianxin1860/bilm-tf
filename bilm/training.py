@@ -19,7 +19,70 @@ DTYPE = 'float32'
 DTYPE_INT = 'int64'
 
 tf.logging.set_verbosity(tf.logging.INFO)
+name_dict = {
+}
 
+slot_dict = {}
+def init_slot():
+    global slot_dict
+    slot_dict = {}
+
+def name2slot(para_name):
+    res = []
+    for key_name in name_dict.keys():
+        if para_name.find(key_name) >= 0:
+            res.append(name_dict[key_name])
+    return res
+
+def update_slot(slots, p_array):
+    p_mean, p_max, p_min, p_num = p_array.mean(), p_array.max(), p_array.min(), np.prod(p_array.shape)
+    for slot in slots:
+        if slot in slot_dict:
+            s_mean, s_max, s_min, s_num = slot_dict[slot]
+            s_mean = (s_mean*s_num + p_mean*p_num) / (p_num + s_num)
+            s_max = max(s_max, p_max)
+            s_min = min(s_min, p_min)
+            s_num = p_num + s_num
+            slot_dict[slot] = [s_mean, s_max, s_min, s_num]
+        else:
+            slot_dict[slot] = [p_mean, p_max, p_min, p_num]
+
+def record_slot(logger):
+    for slot in slot_dict:
+        logger.info("slot:" + "\t".join([str(x) for x in [slot] + slot_dict[slot]]))
+
+def var_print(tag, p_array, p_name, name, logger, args):
+    if isinstance(p_array,np.float32):
+	p_array=np.array([p_array]) 
+    if not isinstance(p_array, np.ndarray):
+	p_array = p_array.values
+    param_num = np.prod(p_array.shape)
+    p_array3 = np.multiply(np.multiply(p_array, p_array), p_array)
+    logger.info(tag + ": {0} ({1}),  l3={2} sum={3}  max={4}  min={5} mean={6} num={7} {8}".format(p_name, name, p_array3.sum(), p_array.sum(), p_array.max(), p_array.min(), p_array.mean(), p_array.shape, param_num))
+    if args.detail:
+	logger.info(" ".join([tag + "[", p_name, '] shape [', str(p_array.shape), ']', str(p_array)]))
+
+def print_num_of_total_parameters(sess, logger, args):
+    if not args.debug_print:
+	return
+    init_slot()
+    total_parameters = 0
+    parameters_string = ""
+    
+    for variable in tf.trainable_variables():
+    #for variable in tf.all_variables():
+	shape = variable.get_shape()
+	p_array = sess.run(variable.name)
+	slots = name2slot(variable.name)
+	if slots:
+	    update_slot(slots, p_array)
+	variable_parameters = 1
+	for dim in shape:
+	    variable_parameters *= dim.value
+	total_parameters += variable_parameters
+	var_print('para', p_array, variable.name, variable.name, logger, args)
+    record_slot(logger)
+    logger.info("Total %d variables, %s params" % (len(tf.trainable_variables()), "{:,}".format(total_parameters)))
 
 def print_variable_summary():
     import pprint
@@ -673,7 +736,7 @@ def _get_feed_dict_from_X(X, start, end, model, char_inputs, bidirectional):
 
 
 def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
-          restart_ckpt_file=None):
+          restart_ckpt_file=None, args=None):
 
     # not restarting so save the options
     if restart_ckpt_file is None:
@@ -878,9 +941,10 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 init_state_values = ret[4:]
                 
 
-            if batch_no % 1250 == 0:
+            if batch_no % args.log_interval == 0:
                 summary_writer.add_summary(ret[3], batch_no)
-            if batch_no % 100 == 0:
+                logger = logging.getLogger("lm")
+                print_num_of_total_parameters(sess, logger, args)
                 # write the summaries to tensorboard and display perplexity
                 summary_writer.add_summary(ret[1], batch_no)
                 print("Batch %s, train_perplexity=%s" % (batch_no, ret[2]))

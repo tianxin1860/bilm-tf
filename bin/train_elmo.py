@@ -46,7 +46,7 @@ def main(args):
 
     tf_save_dir = args.save_dir
     tf_log_dir = args.save_dir
-    train(options, data, n_gpus, tf_save_dir, tf_log_dir)
+    train(options, data, n_gpus, tf_save_dir, tf_log_dir, args)
 
 
 if __name__ == '__main__':
@@ -54,6 +54,9 @@ if __name__ == '__main__':
     parser.add_argument('--save_dir', help='Location of checkpoint files')
     parser.add_argument('--vocab_file', help='Vocabulary file')
     parser.add_argument('--train_prefix', help='Prefix for train files')
+    parser.add_argument('--para_print', action='store_true')
+    parser.add_argument('--log_interval', type=int, default=100)
+    parser.add_argument('--detail', action='store_true')
 
     args = parser.parse_args()
     main(args)
