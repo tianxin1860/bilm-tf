@@ -56,6 +56,9 @@ if __name__ == '__main__':
     parser.add_argument('--train_prefix', help='Prefix for train files')
     parser.add_argument('--para_print', action='store_true')
     parser.add_argument('--log_interval', type=int, default=100)
+    parser.add_argument('--random_seed', type=int, default=123)
+    parser.add_argument('--save_para_path', type=str, default='')
+    parser.add_argument('--load_para_path', type=str, default='')
     parser.add_argument('--detail', action='store_true')
 
     args = parser.parse_args()

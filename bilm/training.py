@@ -6,6 +6,7 @@ import os
 import time
 import json
 import re
+import pickle
 
 import tensorflow as tf
 import numpy as np
@@ -20,6 +21,21 @@ DTYPE_INT = 'int64'
 
 tf.logging.set_verbosity(tf.logging.INFO)
 name_dict = {
+  'lm/embedding/embedding:0':1,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0':21,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/kernel:0':22,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/projection/kernel:0':23,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/bias:0':31,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/kernel:0':32,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/projection/kernel:0':33,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0':41,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/kernel:0':42,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/projection/kernel:0':43,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/bias:0':51,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/kernel:0':52,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/projection/kernel:0':53,
+  'lm/softmax/b:0':61,
+  'lm/softmax/W:0':62,
 }
 
 slot_dict = {}
@@ -27,8 +43,13 @@ def init_slot():
     global slot_dict
     slot_dict = {}
 
-def name2slot(para_name):
+def name2slot(para_name, exact=False):
     res = []
+    if exact:
+        if para_name in name_dict:
+            return [name_dict[para_name]]
+        else:
+            return []
     for key_name in name_dict.keys():
         if para_name.find(key_name) >= 0:
             res.append(name_dict[key_name])
@@ -94,6 +115,21 @@ def print_debug_info(sess, logger, vars_data=None, args=None):
     record_slot(logger)
     logger.info("Total %d variables, %s params" % (len(tf.trainable_variables()), "{:,}".format(total_parameters)))
 
+def save_var(p_array, name, logger, args):
+    if args.save_para_path:
+        if name2slot(name, exact=True):
+            name = 'slot_' + str(name2slot(name, exact=True)[0])
+        else:
+            name = name.replace('/', '%')
+        with open(os.path.join(args.save_para_path, name + '.data'), 'wb') as fout:
+            pickle.dump(p_array, fout)
+
+def save_para(sess, logger, args=None):
+    for variable in tf.trainable_variables():
+	p_array = sess.run(variable.name)
+	save_var(p_array, variable.name, logger, args)
+
+
 def print_variable_summary():
     import pprint
     variables = sorted([[v.name, v.get_shape()] for v in tf.global_variables()])
@@ -157,7 +193,8 @@ class LanguageModel(object):
                                shape=(batch_size, unroll_steps),
                                name='token_ids')
         # the word embeddings
-        with tf.device("/cpu:0"):
+        #with tf.device("/cpu:0"):
+        with tf.variable_scope('embedding') as scope:
             self.embedding_weights = tf.get_variable(
                 "embedding", [n_tokens_vocab, projection_dim],
                 dtype=DTYPE,
@@ -171,7 +208,8 @@ class LanguageModel(object):
             self.token_ids_reverse = tf.placeholder(DTYPE_INT,
                                shape=(batch_size, unroll_steps),
                                name='token_ids_reverse')
-            with tf.device("/cpu:0"):
+            #with tf.device("/cpu:0"):
+            with tf.variable_scope('embedding') as scope:
                 self.embedding_reverse = tf.nn.embedding_lookup(
                     self.embedding_weights, self.token_ids_reverse)
 
@@ -539,7 +577,8 @@ class LanguageModel(object):
             # softmax_W is just the embedding layer
             self.softmax_W = self.embedding_weights
 
-        with tf.variable_scope('softmax'), tf.device('/cpu:0'):
+        #with tf.variable_scope('softmax'), tf.device('/cpu:0'):
+        with tf.variable_scope('softmax') as scope:
             # Glorit init (std=(1.0 / sqrt(fan_in))
             softmax_init = tf.random_normal_initializer(0.0,
                 1.0 / np.sqrt(softmax_dim))
@@ -747,6 +786,10 @@ def _get_feed_dict_from_X(X, start, end, model, char_inputs, bidirectional):
 
 def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
           restart_ckpt_file=None, args=None):
+    import random
+    random.seed(args.random_seed)
+    np.random.seed(args.random_seed)
+    tf.set_random_seed(args.random_seed)
     import logging
     logger = logging.getLogger("lm")
     logger.setLevel(logging.INFO)
@@ -796,8 +839,6 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                     tower_grads.append(grads)
                     # keep track of loss across all GPUs
                     train_perplexity += loss
-
-        print_variable_summary()
 
         # calculate the mean of each gradient across all GPUs
         grads = average_gradients(tower_grads, options['batch_size'], options)
@@ -871,6 +912,8 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         n_tokens_per_batch = batch_size * unroll_steps * n_gpus
         n_batches_per_epoch = int(n_train_tokens / n_tokens_per_batch)
         n_batches_total = options['n_epochs'] * n_batches_per_epoch
+        print_debug_info(sess, logger, args=args)
+        save_para(sess, logger, args)
         print("Training for %s epochs and %s batches" % (
             options['n_epochs'], n_batches_total))
 
