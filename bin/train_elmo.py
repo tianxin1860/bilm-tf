@@ -13,7 +13,7 @@ def main(args):
 
     # define the options
     batch_size = 128  # batch size for each GPU
-    n_gpus = 8
+    n_gpus = args.gpu_num
 
     # number of tokens in training data (this for 1B Word Benchmark)
     n_train_tokens = 867616283
@@ -42,7 +42,7 @@ def main(args):
 
     prefix = args.train_prefix
     data = BidirectionalLMDataset(prefix, vocab, test=False,
-                                      shuffle_on_load=True)
+                                      shuffle_on_load=False)
 
     tf_save_dir = args.save_dir
     tf_log_dir = args.save_dir
@@ -57,6 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--para_print', action='store_true')
     parser.add_argument('--log_interval', type=int, default=100)
     parser.add_argument('--random_seed', type=int, default=123)
+    parser.add_argument('--gpu_num', type=int, default=1)
     parser.add_argument('--save_para_path', type=str, default='')
     parser.add_argument('--load_para_path', type=str, default='')
     parser.add_argument('--detail', action='store_true')

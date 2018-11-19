@@ -118,11 +118,12 @@ def print_debug_info(sess, logger, vars_data=None, args=None):
 def save_var(p_array, name, logger, args):
     if args.save_para_path:
         if name2slot(name, exact=True):
-            name = 'slot_' + str(name2slot(name, exact=True)[0])
+            new_name = 'slot_' + str(name2slot(name, exact=True)[0])
         else:
-            name = name.replace('/', '%')
-        with open(os.path.join(args.save_para_path, name + '.data'), 'wb') as fout:
+            new_name = name.replace('/', '%')
+        with open(os.path.join(args.save_para_path, new_name + '.data'), 'wb') as fout:
             pickle.dump(p_array, fout)
+            logger.info('saved {} to {}'.format(name, new_name))
 
 def save_para(sess, logger, args=None):
     for variable in tf.trainable_variables():
@@ -265,7 +266,7 @@ class LanguageModel(object):
                                    shape=(batch_size, unroll_steps, max_chars),
                                    name='tokens_characters')
         # the character embeddings
-        with tf.device("/cpu:0"):
+        with tf.device("/gpu:0"):
             self.embedding_weights = tf.get_variable(
                     "char_embed", [n_chars, char_embed_dim],
                     dtype=DTYPE,
@@ -806,7 +807,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         with open(os.path.join(tf_save_dir, 'options.json'), 'w') as fout:
             fout.write(json.dumps(options))
 
-    with tf.device('/cpu:0'):
+    with tf.device('/gpu:0'):
         global_step = tf.get_variable(
             'global_step', [],
             initializer=tf.constant_initializer(0), trainable=False)
@@ -927,6 +928,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             final_state_tensors.extend(model.final_lstm_state)
             fetch_vars.extend(model.lstm_inputs)
             fetch_vars.extend(model.lstm_outputs)
+            fetch_vars.append(model.token_ids)
             i = i + 1
 
         char_inputs = 'char_cnn' in options

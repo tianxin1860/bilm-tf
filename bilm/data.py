@@ -389,6 +389,7 @@ class LMDataset(object):
         print('Loading data from: %s' % shard_name)
         with open(shard_name) as f:
             sentences_raw = f.readlines()
+            sentences_raw = [x.strip().decode(encoding='utf-8') for x in sentences_raw]
 
         if self._reverse:
             sentences = []

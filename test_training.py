@@ -98,7 +98,7 @@ class TestLanguageModel(unittest.TestCase):
 
     def test_train_bilm_chars(self):
         vocab, data, options = self._get_vocab_data_options(True, True)
-        train(options, data, 1, self.tmp_dir, self.tmp_dir)
+        train(options, data, 1, self.tmp_dir, self.tmp_dir, args=self.args)
 
         # now test
         tf.reset_default_graph()
@@ -144,7 +144,7 @@ class TestLanguageModel(unittest.TestCase):
         vocab, data, options = self._get_vocab_data_options(
             bidirectional, use_chars)
         options['lstm']['use_skip_connections'] = True
-        train(options, data, 1, self.tmp_dir, self.tmp_dir)
+        train(options, data, 1, self.tmp_dir, self.tmp_dir, args=self.args)
 
         # now test
         tf.reset_default_graph()
