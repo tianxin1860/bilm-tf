@@ -12,7 +12,6 @@ def main(args):
     vocab = load_vocab(args.vocab_file)
 
     # define the options
-    batch_size = 128  # batch size for each GPU
     n_gpus = args.gpu_num
 
     # number of tokens in training data (this for 1B Word Benchmark)
@@ -20,24 +19,26 @@ def main(args):
 
     options = {
      'bidirectional': True,
-     'dropout': 0.1,
+     'dropout': args.dropout,
     
      'lstm': {
       'cell_clip': 3,
-      'dim': 4096,
-      'n_layers': 2,
+      'dim': args.lstm_dim,
+      'n_layers': args.n_layers,
       'proj_clip': 3,
-      'projection_dim': 512,
+      'projection_dim': args.projection_dim,
       'use_skip_connections': True},
     
      'all_clip_norm_val': 10.0,
     
      'n_epochs': 10,
      'n_train_tokens': n_train_tokens,
-     'batch_size': batch_size,
+     'batch_size': args.batch_size,
      'n_tokens_vocab': vocab.size,
-     'unroll_steps': 20,
+     'unroll_steps': args.n_steps,
      'n_negative_samples_batch': 8000,
+     'para_init':args.para_init,
+     'init1':args.init1
     }
 
     prefix = args.train_prefix
@@ -58,9 +59,17 @@ if __name__ == '__main__':
     parser.add_argument('--log_interval', type=int, default=100)
     parser.add_argument('--random_seed', type=int, default=123)
     parser.add_argument('--gpu_num', type=int, default=1)
+    parser.add_argument('--n_layers', type=int, default=2)
+    parser.add_argument('--projection_dim', type=int, default=512)
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--lstm_dim', type=int, default=4096)
+    parser.add_argument('--n_steps', type=int, default=20)
+    parser.add_argument('--dropout', type=float, default=0.0)
     parser.add_argument('--save_para_path', type=str, default='')
     parser.add_argument('--load_para_path', type=str, default='')
     parser.add_argument('--detail', action='store_true')
+    parser.add_argument('--para_init', action='store_true')
+    parser.add_argument('--init1', type=float, default=0.1)
 
     args = parser.parse_args()
     main(args)
