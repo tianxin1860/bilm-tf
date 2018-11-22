@@ -3,13 +3,13 @@ import argparse
 
 import numpy as np
 
-from bilm.training import train, load_options_latest_checkpoint, load_vocab
-from bilm.data import BidirectionalLMDataset
+from bilm.training import train
+from bilm.data import BidirectionalLMDataset, Vocabulary
 import os
 
 def main(args):
     # load the vocab
-    vocab = load_vocab(args.vocab_file)
+    vocab = Vocabulary(args.vocab_file)
 
     # define the options
     n_gpus = args.gpu_num

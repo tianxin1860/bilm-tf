@@ -11,11 +11,6 @@ import pickle
 import tensorflow as tf
 import numpy as np
 
-from tensorflow.python.ops.init_ops import glorot_uniform_initializer
-
-from .data import Vocabulary, UnicodeCharsVocabulary, InvalidNumberOfCharacters
-
-
 DTYPE = 'float32'
 DTYPE_INT = 'int64'
 
@@ -853,67 +848,4 @@ def test(options, ckpt_file, data, batch_size=256):
     print("FINSIHED!  AVERAGE PERPLEXITY = %s" % np.exp(avg_loss))
 
     return np.exp(avg_loss)
-
-
-def load_options_latest_checkpoint(tf_save_dir):
-    options_file = os.path.join(tf_save_dir, 'options.json')
-    ckpt_file = tf.train.latest_checkpoint(tf_save_dir)
-
-    with open(options_file, 'r') as fin:
-        options = json.load(fin)
-
-    return options, ckpt_file
-
-
-def load_vocab(vocab_file, max_word_length=None):
-    if max_word_length:
-        return UnicodeCharsVocabulary(vocab_file, max_word_length,
-                                      validate_file=True)
-    else:
-        return Vocabulary(vocab_file, validate_file=True)
-
-
-def dump_weights(tf_save_dir, outfile):
-    '''
-    Dump the trained weights from a model to a HDF5 file.
-    '''
-    import h5py
-
-    def _get_outname(tf_name):
-        outname = re.sub(':0$', '', tf_name)
-        outname = outname.lstrip('lm/')
-        outname = re.sub('/rnn/', '/RNN/', outname)
-        outname = re.sub('/multi_rnn_cell/', '/MultiRNNCell/', outname)
-        outname = re.sub('/cell_', '/Cell', outname)
-        outname = re.sub('/lstm_cell/', '/LSTMCell/', outname)
-        if '/RNN/' in outname:
-            if 'projection' in outname:
-                outname = re.sub('projection/kernel', 'W_P_0', outname)
-            else:
-                outname = re.sub('/kernel', '/W_0', outname)
-                outname = re.sub('/bias', '/B', outname)
-        return outname
-
-    options, ckpt_file = load_options_latest_checkpoint(tf_save_dir)
-
-    config = tf.ConfigProto(allow_soft_placement=True)
-    with tf.Session(config=config) as sess:
-        with tf.variable_scope('lm'):
-            model = LanguageModel(options, False)
-            # we use the "Saver" class to load the variables
-            loader = tf.train.Saver()
-            loader.restore(sess, ckpt_file)
-
-        with h5py.File(outfile, 'w') as fout:
-            for v in tf.trainable_variables():
-                if v.name.find('softmax') >= 0:
-                    # don't dump these
-                    continue
-                outname = _get_outname(v.name)
-                print("Saving variable {0} with name {1}".format(
-                    v.name, outname))
-                shape = v.get_shape().as_list()
-                dset = fout.create_dataset(outname, shape, dtype='float32')
-                values = sess.run([v])[0]
-                dset[...] = values
 
