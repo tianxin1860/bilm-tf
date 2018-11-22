@@ -1,0 +1,2 @@
+export CUDA_VISIBLE_DEVICES=0
+python -m unittest test_training.TestLanguageModel.test_train_skip_connections

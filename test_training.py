@@ -29,6 +29,7 @@ class TestLanguageModel(unittest.TestCase):
             log_interval = 1
             random_seed = 123
             save_para_path = 'output/para'
+            learning_rate = 0.2
         self.args = Args()
 
     def _get_data(self, bidirectional, use_chars, test=False):
@@ -59,6 +60,7 @@ class TestLanguageModel(unittest.TestCase):
             'n_epochs': 50,
             'all_clip_norm_val': 1.0,
             'dropout': 0.1,
+            'para_init':False,
             'lstm': {'dim': 16, 'projection_dim': 8, 'n_layers': 2},
             'bidirectional': bidirectional,
         }
@@ -139,6 +141,7 @@ class TestLanguageModel(unittest.TestCase):
             train(options, data, 1, self.tmp_dir, self.tmp_dir)
 
     def test_train_skip_connections(self):
+        import pdb; pdb.set_trace()
         bidirectional = True
         use_chars = False
         vocab, data, options = self._get_vocab_data_options(

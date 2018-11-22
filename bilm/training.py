@@ -90,7 +90,7 @@ def var_print(tag, p_array, p_name, name, logger, args):
     if args.detail:
 	logger.info(" ".join([tag + "[", p_name, '] shape [', str(p_array.shape), ']', str(p_array)]))
 
-def print_debug_info(sess, logger, vars_data=None, grad_data=None, args=None):
+def print_debug_info(sess, logger, vars_data=None, grad_data=None, grad_para_data=None, args=None):
     if not args.para_print:
 	return
     if vars_data:
@@ -105,12 +105,29 @@ def print_debug_info(sess, logger, vars_data=None, grad_data=None, args=None):
     if grad_data:
         grad_vars, graded_vars = grad_data
         for grad, graded_var in zip(grad_vars, graded_vars):
-            shape = grad.get_shape()
+            try:
+                shape = grad.get_shape()
+            except:
+                logger.info('grad {} failed'.format(grad.name))
+                continue
             p_array = graded_var
             variable_parameters = 1
             for dim in shape:
                 variable_parameters *= dim.value
             var_print('grad', p_array, grad.name, grad.name, logger, args)
+    if grad_para_data:
+        grad_vars, graded_vars = grad_para_data
+        for grad, graded_var in zip(grad_vars, graded_vars):
+            try:
+                shape = grad.get_shape()
+            except:
+                logger.info('grad para {} failed'.format(grad.name))
+                continue
+            p_array = graded_var
+            variable_parameters = 1
+            for dim in shape:
+                variable_parameters *= dim.value
+            var_print('grad para', p_array, grad.name, grad.name, logger, args)
 
     init_slot()
     total_parameters = 0
@@ -739,7 +756,6 @@ def summary_gradient_updates(grads, opt, lr):
 
         if g is None:
             continue
-
         if isinstance(g, tf.IndexedSlices):
             # a sparse gradient - only take norm of params that are updated
             values = tf.gather(v, g.indices)
@@ -817,6 +833,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
     logger = logging.getLogger("lm")
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
@@ -830,14 +847,24 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             fout.write(json.dumps(options))
 
     with tf.device('/gpu:0'):
+        '''
         global_step = tf.get_variable(
             'global_step', [],
             initializer=tf.constant_initializer(0), trainable=False)
-
+        #'''
         # set up the optimizer
-        lr = options.get('learning_rate', 0.2)
-        opt = tf.train.AdagradOptimizer(learning_rate=lr,
-                                        initial_accumulator_value=1.0)
+        lr = args.learning_rate
+        if args.optim == 'sgd':
+            opt = tf.train.GradientDescentOptimizer(learning_rate=lr)
+        elif args.optim == 'adam':
+            optimizer = tf.train.AdamOptimizer(
+                learning_rate=args.learning_rate)
+        elif args.optim == 'rprop':
+            optimizer = tf.train.RMSPropOptimizer(
+                learning_rate=args.learning_rate)
+        else:
+            opt = tf.train.AdagradOptimizer(learning_rate=0.2,
+                                        initial_accumulator_value=1.0e-5)
 
         # calculate the gradients on each GPU
         tower_grads = []
@@ -865,9 +892,10 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                     train_perplexity += loss
 
         # calculate the mean of each gradient across all GPUs
-        grads = average_gradients(tower_grads, options['batch_size'], options)
-        grads, norm_summary_ops = clip_grads(grads, options, True, global_step)
-        norm_summaries.extend(norm_summary_ops)
+        #grads = average_gradients(tower_grads, options['batch_size'], options)
+        #grads2, norm_summary_ops = clip_grads(grads, options, True, global_step)
+        grads2=grads
+        #norm_summaries.extend(norm_summary_ops)
 
         # log the training perplexity
         train_perplexity = tf.exp(train_perplexity / n_gpus)
@@ -889,7 +917,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 tf.summary.histogram('lstm_embedding_1', lstm_out[1]))
 
         # apply the gradients to create the training operation
-        train_op = opt.apply_gradients(grads, global_step=global_step)
+        train_op = opt.apply_gradients(grads2)#, global_step=global_step)
 
         # histograms of variables
         for v in tf.global_variables():
@@ -938,6 +966,9 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         n_batches_total = options['n_epochs'] * n_batches_per_epoch
         print_debug_info(sess, logger, args=args)
         save_para(sess, logger, args)
+        #checkpoint_path = os.path.join(tf_save_dir, 'model.ckpt')
+        #saver.save(sess, checkpoint_path, global_step=global_step)
+
         print("Training for %s epochs and %s batches" % (
             options['n_epochs'], n_batches_total))
 
@@ -950,12 +981,24 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         for model in models:
             init_state_tensors.extend(model.init_lstm_state)
             final_state_tensors.extend(model.final_lstm_state)
-            #fetch_vars.append(model.token_ids)
-            #fetch_vars.append(model.token_ids_reverse)
+            fetch_vars.append(model.token_ids)
+            fetch_vars.append(model.token_ids_reverse)
             fetch_vars.extend(model.lstm_inputs)
             fetch_vars.extend(model.lstm_outputs)
             fetch_vars.extend(model.individual_losses)
-            grad_vars = tf.gradients(ys=model.total_loss, xs=fetch_vars)
+            grad_vars.extend(model.lstm_inputs)
+            grad_vars.extend(model.lstm_outputs)
+            grad_vars.extend(model.individual_losses)
+            para = tf.trainable_variables()
+            #grad_vars.extend(grads)
+            #grad_vars.extend(grads2)
+           
+            grad_vars = tf.gradients(ys=model.total_loss, xs=grad_vars)
+            if args.optim == 'adagrad':
+                opt_slot = [opt.get_slot(v, 'accumulator') for v in para]
+                grad_vars.extend(opt_slot)
+            grad_para = tf.gradients(ys=model.total_loss, xs=para)
+
             i = i + 1
 
         char_inputs = 'char_cnn' in options
@@ -1016,9 +1059,10 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             #   state tensors, token ids and next token ids
             fetch_vars_len = len(fetch_vars)
             grad_vars_len = len(grad_vars)
+            grad_para_len = len(grad_para)
             if batch_no % 1250 != 0:
                 ret = sess.run(
-                    [train_op, summary_op, train_perplexity] + fetch_vars + grad_vars +
+                    [train_op, summary_op, train_perplexity] + fetch_vars + grad_vars + grad_para +
                                                 final_state_tensors,
                     feed_dict=feed_dict
                 )
@@ -1028,9 +1072,10 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 # last entries are the final states -- set them to
                 # init_state_values
                 # for next batch
-                init_state_values = ret[3 + fetch_vars_len + grad_vars_len:]
                 fetched_vars = ret[3:3 + fetch_vars_len]
                 graded_vars = ret[3 + fetch_vars_len:3 + fetch_vars_len + grad_vars_len]
+                graded_para = ret[3 + fetch_vars_len + grad_vars_len:3 + fetch_vars_len + grad_vars_len + grad_para_len]
+                init_state_values = ret[3 + fetch_vars_len + grad_vars_len + grad_para_len:]
             else:
                 # also run the histogram summaries
                 ret = sess.run(
@@ -1038,15 +1083,17 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                                                 final_state_tensors,
                     feed_dict=feed_dict
                 )
-                init_state_values = ret[4 + fetch_vars_len + grad_vars_len:]
                 fetched_vars = ret[4:4 + fetch_vars_len]
                 graded_vars = ret[4 + fetch_vars_len:4 + fetch_vars_len + grad_vars_len]
+                graded_para = ret[4 + fetch_vars_len + grad_vars_len:4 + fetch_vars_len + grad_vars_len + grad_para_len]
+                init_state_values = ret[4 + fetch_vars_len + grad_vars_len + grad_para_len:]
             if batch_no % args.log_interval == 0:
                 #summary_writer.add_summary(ret[3], batch_no)
-                print_debug_info(sess, logger, vars_data=(fetch_vars, fetched_vars), grad_data=(grad_vars, graded_vars), args=args)
+                print_debug_info(sess, logger, vars_data=(fetch_vars, fetched_vars), grad_data=(grad_vars, graded_vars), grad_para_data=(para, graded_para), args=args)
                 # write the summaries to tensorboard and display perplexity
                 summary_writer.add_summary(ret[1], batch_no)
                 print("Batch %s, train_perplexity=%s" % (batch_no, ret[2]))
+                #print(sess.run(global_step))
                 print("Total time: %s" % (time.time() - t1))
 
             if (batch_no % 1250 == 0) or (batch_no == n_batches_total):
@@ -1056,7 +1103,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
 
             if batch_no > 100 and args.para_print:
                 exit(0)
-            if batch_no > 10 and args.detail:
+            if batch_no > 0 and args.detail:
                 exit(0)
 
             if batch_no == n_batches_total:
