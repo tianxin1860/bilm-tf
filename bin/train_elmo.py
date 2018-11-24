@@ -12,7 +12,7 @@ def main(args):
     vocab = Vocabulary(args.vocab_file)
 
     # define the options
-    n_gpus = args.gpu_num
+    n_gpus = 1
 
     # number of tokens in training data (this for 1B Word Benchmark)
     n_train_tokens = 867616283
@@ -36,7 +36,6 @@ def main(args):
      'batch_size': args.batch_size,
      'n_tokens_vocab': vocab.size,
      'unroll_steps': args.n_steps,
-     'n_negative_samples_batch': 8000,
      'para_init':args.para_init,
      'init1':args.init1
     }

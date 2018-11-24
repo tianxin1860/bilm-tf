@@ -30,6 +30,7 @@ from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
 from tensorflow.python.platform import test
 from tensorflow.python.training import adagrad
+#from tensorflow.train import AdagradOptimizer as adagrad
 
 
 class AdagradOptimizerTest(test.TestCase):
@@ -62,6 +63,7 @@ class AdagradOptimizerTest(test.TestCase):
             np.array([-1.6026098728179932, -0.6026098728179932]), var0.eval())
         self.assertAllCloseAccordingToType(
             np.array([2.715679168701172, 3.715679168701172]), var1.eval())
+
   def doTestBasic2(self, use_locking=False, use_resource=False):
     import pdb; pdb.set_trace()
     for dtype in [dtypes.float64]:
@@ -74,8 +76,10 @@ class AdagradOptimizerTest(test.TestCase):
         grads0 = constant_op.constant([ 3.2241798e-05,  3.2241798e-05,  3.2241798e-05,  2.2079140e-08,
    2.2079140e-08,  2.2079140e-08,  1.8463071e-09,  1.8463071e-09,
    1.8463071e-09,  2.0333456e-08,  2.0333456e-08,  2.0333456e-08], dtype=dtype)
-        ada_opt = adagrad.AdagradOptimizer(
-            0.2, initial_accumulator_value=1.0e-5, use_locking=use_locking)
+        import tensorflow as tf 
+        ada_opt = tf.train.GradientDescentOptimizer(learning_rate=1000)
+        #ada_opt = tensorflow.train.AdagradOptimizer(
+        #    0.2, initial_accumulator_value=1.0e-5, use_locking=use_locking)
         ada_update = ada_opt.apply_gradients(
             zip([grads0], [var0]),global_step=global_step)
         variables.global_variables_initializer().run()
