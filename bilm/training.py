@@ -6,6 +6,7 @@ import os
 import time
 import json
 import re
+import pickle
 
 import tensorflow as tf
 import numpy as np
@@ -20,6 +21,28 @@ DTYPE_INT = 'int64'
 
 tf.logging.set_verbosity(tf.logging.INFO)
 name_dict = {
+  'lm/embedding/embedding:0':1,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0':21,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/kernel:0':22,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/projection/kernel:0':23,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/bias:0':31,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/kernel:0':32,
+  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/projection/kernel:0':33,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0':41,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/kernel:0':42,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/projection/kernel:0':43,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/bias:0':51,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/kernel:0':52,
+  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/projection/kernel:0':53,
+  'lm/RNN_0/rnn/lstm_cell/bias:0':21,
+  'lm/RNN_0/rnn/lstm_cell/kernel:0':22,
+  'lm/RNN_0/rnn/lstm_cell/projection/kernel:0':23,
+  'lm/RNN_1/rnn/lstm_cell/bias:0':41,
+  'lm/RNN_1/rnn/lstm_cell/kernel:0':42,
+  'lm/RNN_1/rnn/lstm_cell/projection/kernel:0':43,
+
+  'lm/softmax/b:0':61,
+  'lm/softmax/W:0':62,
 }
 
 slot_dict = {}
@@ -27,8 +50,13 @@ def init_slot():
     global slot_dict
     slot_dict = {}
 
-def name2slot(para_name):
+def name2slot(para_name, exact=False):
     res = []
+    if exact:
+        if para_name in name_dict:
+            return [name_dict[para_name]]
+        else:
+            return []
     for key_name in name_dict.keys():
         if para_name.find(key_name) >= 0:
             res.append(name_dict[key_name])
@@ -62,9 +90,45 @@ def var_print(tag, p_array, p_name, name, logger, args):
     if args.detail:
 	logger.info(" ".join([tag + "[", p_name, '] shape [', str(p_array.shape), ']', str(p_array)]))
 
-def print_num_of_total_parameters(sess, logger, args):
+def print_debug_info(sess, logger, vars_data=None, grad_data=None, grad_para_data=None, args=None):
     if not args.para_print:
 	return
+    if vars_data:
+        vars, fetched_vars = vars_data
+        for var, fetched_var in zip(vars, fetched_vars):
+            shape = var.get_shape()
+            p_array = fetched_var
+            variable_parameters = 1
+            for dim in shape:
+                variable_parameters *= dim.value
+            var_print('var', p_array, var.name, var.name, logger, args)
+    if grad_data:
+        grad_vars, graded_vars = grad_data
+        for grad, graded_var in zip(grad_vars, graded_vars):
+            try:
+                shape = grad.get_shape()
+            except:
+                logger.info('grad {} failed'.format(grad.name))
+                continue
+            p_array = graded_var
+            variable_parameters = 1
+            for dim in shape:
+                variable_parameters *= dim.value
+            var_print('grad', p_array, grad.name, grad.name, logger, args)
+    if grad_para_data:
+        grad_vars, graded_vars = grad_para_data
+        for grad, graded_var in zip(grad_vars, graded_vars):
+            try:
+                shape = grad.get_shape()
+            except:
+                logger.info('grad para {} failed'.format(grad.name))
+                continue
+            p_array = graded_var
+            variable_parameters = 1
+            for dim in shape:
+                variable_parameters *= dim.value
+            var_print('grad para', p_array, grad.name, grad.name, logger, args)
+
     init_slot()
     total_parameters = 0
     parameters_string = ""
@@ -83,6 +147,22 @@ def print_num_of_total_parameters(sess, logger, args):
 	var_print('para', p_array, variable.name, variable.name, logger, args)
     record_slot(logger)
     logger.info("Total %d variables, %s params" % (len(tf.trainable_variables()), "{:,}".format(total_parameters)))
+
+def save_var(p_array, name, logger, args):
+    if args.save_para_path:
+        if name2slot(name, exact=True):
+            new_name = 'slot_' + str(name2slot(name, exact=True)[0])
+        else:
+            new_name = name.replace('/', '%')
+        with open(os.path.join(args.save_para_path, new_name + '.data'), 'wb') as fout:
+            pickle.dump(p_array, fout)
+            logger.info('saved {} to {}'.format(name, new_name))
+
+def save_para(sess, logger, args=None):
+    for variable in tf.trainable_variables():
+	p_array = sess.run(variable.name)
+	save_var(p_array, variable.name, logger, args)
+
 
 def print_variable_summary():
     import pprint
@@ -130,7 +210,7 @@ class LanguageModel(object):
             raise ValueError("Sharing softmax and embedding weights requires "
                              "word input")
 
-        self.sample_softmax = options.get('sample_softmax', True)
+        self.sample_softmax = options.get('sample_softmax', False)
 
         self._build()
 
@@ -147,7 +227,8 @@ class LanguageModel(object):
                                shape=(batch_size, unroll_steps),
                                name='token_ids')
         # the word embeddings
-        with tf.device("/cpu:0"):
+        #with tf.device("/cpu:0"):
+        with tf.variable_scope('embedding') as scope:
             self.embedding_weights = tf.get_variable(
                 "embedding", [n_tokens_vocab, projection_dim],
                 dtype=DTYPE,
@@ -161,7 +242,8 @@ class LanguageModel(object):
             self.token_ids_reverse = tf.placeholder(DTYPE_INT,
                                shape=(batch_size, unroll_steps),
                                name='token_ids_reverse')
-            with tf.device("/cpu:0"):
+            #with tf.device("/cpu:0"):
+            with tf.variable_scope('embedding') as scope:
                 self.embedding_reverse = tf.nn.embedding_lookup(
                     self.embedding_weights, self.token_ids_reverse)
 
@@ -217,7 +299,7 @@ class LanguageModel(object):
                                    shape=(batch_size, unroll_steps, max_chars),
                                    name='tokens_characters')
         # the character embeddings
-        with tf.device("/cpu:0"):
+        with tf.device("/gpu:0"):
             self.embedding_weights = tf.get_variable(
                     "char_embed", [n_chars, char_embed_dim],
                     dtype=DTYPE,
@@ -411,9 +493,9 @@ class LanguageModel(object):
 
         # get the LSTM inputs
         if self.bidirectional:
-            lstm_inputs = [self.embedding, self.embedding_reverse]
+            self.lstm_inputs = [self.embedding, self.embedding_reverse]
         else:
-            lstm_inputs = [self.embedding]
+            self.lstm_inputs = [self.embedding]
 
         # now compute the LSTM outputs
         cell_clip = self.options['lstm'].get('cell_clip')
@@ -423,16 +505,20 @@ class LanguageModel(object):
                                             'use_skip_connections')
         if use_skip_connections:
             print("USING SKIP CONNECTIONS")
-
-        lstm_outputs = []
-        for lstm_num, lstm_input in enumerate(lstm_inputs):
+        if self.options['para_init']:
+            init = tf.constant_initializer(self.options['init1'])
+        else:
+            init=None
+        self.lstm_outputs = []
+        for lstm_num, lstm_input in enumerate(self.lstm_inputs):
             lstm_cells = []
             for i in range(n_lstm_layers):
                 if projection_dim < lstm_dim:
                     # are projecting down output
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim, num_proj=projection_dim,
-                        cell_clip=cell_clip, proj_clip=proj_clip)
+                        forget_bias=0.0, initializer=init)
+                        #cell_clip=cell_clip, proj_clip=proj_clip, forget_bias=0.0, initializer=init)
                 else:
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim,
@@ -481,6 +567,7 @@ class LanguageModel(object):
             # (batch_size * unroll_steps, 512)
             lstm_output_flat = tf.reshape(
                 tf.stack(_lstm_output_unpacked, axis=1), [-1, projection_dim])
+            #lstm_output_flat = _lstm_output_unpacked
             if self.is_training:
                 # add dropout to output
                 lstm_output_flat = tf.nn.dropout(lstm_output_flat,
@@ -488,9 +575,9 @@ class LanguageModel(object):
             tf.add_to_collection('lstm_output_embeddings',
                 _lstm_output_unpacked)
 
-            lstm_outputs.append(lstm_output_flat)
+            self.lstm_outputs.append(lstm_output_flat)
 
-        self._build_loss(lstm_outputs)
+        self._build_loss(self.lstm_outputs)
 
     def _build_loss(self, lstm_outputs):
         '''
@@ -529,7 +616,8 @@ class LanguageModel(object):
             # softmax_W is just the embedding layer
             self.softmax_W = self.embedding_weights
 
-        with tf.variable_scope('softmax'), tf.device('/cpu:0'):
+        #with tf.variable_scope('softmax'), tf.device('/cpu:0'):
+        with tf.variable_scope('softmax') as scope:
             # Glorit init (std=(1.0 / sqrt(fan_in))
             softmax_init = tf.random_normal_initializer(0.0,
                 1.0 / np.sqrt(softmax_dim))
@@ -577,6 +665,7 @@ class LanguageModel(object):
                     # NOTE: tf.nn.sparse_softmax_cross_entropy_with_logits
                     #   expects unnormalized output since it performs the
                     #   softmax internally
+                    #losses = tf.reduce_mean(lstm_output_flat)
                     losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
                         logits=output_scores,
                         labels=tf.squeeze(next_token_id_flat, squeeze_dims=[1])
@@ -667,7 +756,6 @@ def summary_gradient_updates(grads, opt, lr):
 
         if g is None:
             continue
-
         if isinstance(g, tf.IndexedSlices):
             # a sparse gradient - only take norm of params that are updated
             values = tf.gather(v, g.indices)
@@ -737,21 +825,46 @@ def _get_feed_dict_from_X(X, start, end, model, char_inputs, bidirectional):
 
 def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
           restart_ckpt_file=None, args=None):
-
+    import random
+    random.seed(args.random_seed)
+    np.random.seed(args.random_seed)
+    tf.set_random_seed(args.random_seed)
+    import logging
+    logger = logging.getLogger("lm")
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    logger.info(str(args))
+    logger.info(str(options))
     # not restarting so save the options
     if restart_ckpt_file is None:
         with open(os.path.join(tf_save_dir, 'options.json'), 'w') as fout:
             fout.write(json.dumps(options))
 
-    with tf.device('/cpu:0'):
+    with tf.device('/gpu:0'):
+        '''
         global_step = tf.get_variable(
             'global_step', [],
             initializer=tf.constant_initializer(0), trainable=False)
-
+        #'''
         # set up the optimizer
-        lr = options.get('learning_rate', 0.2)
-        opt = tf.train.AdagradOptimizer(learning_rate=lr,
-                                        initial_accumulator_value=1.0)
+        lr = args.learning_rate
+        if args.optim == 'sgd':
+            opt = tf.train.GradientDescentOptimizer(learning_rate=lr)
+        elif args.optim == 'adam':
+            optimizer = tf.train.AdamOptimizer(
+                learning_rate=args.learning_rate)
+        elif args.optim == 'rprop':
+            optimizer = tf.train.RMSPropOptimizer(
+                learning_rate=args.learning_rate)
+        else:
+            opt = tf.train.AdagradOptimizer(learning_rate=0.2,
+                                        initial_accumulator_value=1.0e-5)
 
         # calculate the gradients on each GPU
         tower_grads = []
@@ -773,16 +886,16 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                         loss * options['unroll_steps'],
                         aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE,
                     )
+
                     tower_grads.append(grads)
                     # keep track of loss across all GPUs
                     train_perplexity += loss
 
-        print_variable_summary()
-
         # calculate the mean of each gradient across all GPUs
-        grads = average_gradients(tower_grads, options['batch_size'], options)
-        grads, norm_summary_ops = clip_grads(grads, options, True, global_step)
-        norm_summaries.extend(norm_summary_ops)
+        #grads = average_gradients(tower_grads, options['batch_size'], options)
+        #grads2, norm_summary_ops = clip_grads(grads, options, True, global_step)
+        grads2=grads
+        #norm_summaries.extend(norm_summary_ops)
 
         # log the training perplexity
         train_perplexity = tf.exp(train_perplexity / n_gpus)
@@ -804,7 +917,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 tf.summary.histogram('lstm_embedding_1', lstm_out[1]))
 
         # apply the gradients to create the training operation
-        train_op = opt.apply_gradients(grads, global_step=global_step)
+        train_op = opt.apply_gradients(grads2)#, global_step=global_step)
 
         # histograms of variables
         for v in tf.global_variables():
@@ -851,15 +964,42 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         n_tokens_per_batch = batch_size * unroll_steps * n_gpus
         n_batches_per_epoch = int(n_train_tokens / n_tokens_per_batch)
         n_batches_total = options['n_epochs'] * n_batches_per_epoch
+        print_debug_info(sess, logger, args=args)
+        save_para(sess, logger, args)
+        #checkpoint_path = os.path.join(tf_save_dir, 'model.ckpt')
+        #saver.save(sess, checkpoint_path, global_step=global_step)
+
         print("Training for %s epochs and %s batches" % (
             options['n_epochs'], n_batches_total))
 
         # get the initial lstm states
         init_state_tensors = []
         final_state_tensors = []
+        fetch_vars = []
+        grad_vars = []
+        i = 0
         for model in models:
             init_state_tensors.extend(model.init_lstm_state)
             final_state_tensors.extend(model.final_lstm_state)
+            fetch_vars.append(model.token_ids)
+            fetch_vars.append(model.token_ids_reverse)
+            fetch_vars.extend(model.lstm_inputs)
+            fetch_vars.extend(model.lstm_outputs)
+            fetch_vars.extend(model.individual_losses)
+            grad_vars.extend(model.lstm_inputs)
+            grad_vars.extend(model.lstm_outputs)
+            grad_vars.extend(model.individual_losses)
+            para = tf.trainable_variables()
+            #grad_vars.extend(grads)
+            #grad_vars.extend(grads2)
+           
+            grad_vars = tf.gradients(ys=model.total_loss, xs=grad_vars)
+            if args.optim == 'adagrad':
+                opt_slot = [opt.get_slot(v, 'accumulator') for v in para]
+                grad_vars.extend(opt_slot)
+            grad_para = tf.gradients(ys=model.total_loss, xs=para)
+
+            i = i + 1
 
         char_inputs = 'char_cnn' in options
         if char_inputs:
@@ -917,9 +1057,12 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             # This runs the train_op, summaries and the "final_state_tensors"
             #   which just returns the tensors, passing in the initial
             #   state tensors, token ids and next token ids
+            fetch_vars_len = len(fetch_vars)
+            grad_vars_len = len(grad_vars)
+            grad_para_len = len(grad_para)
             if batch_no % 1250 != 0:
                 ret = sess.run(
-                    [train_op, summary_op, train_perplexity] +
+                    [train_op, summary_op, train_perplexity] + fetch_vars + grad_vars + grad_para +
                                                 final_state_tensors,
                     feed_dict=feed_dict
                 )
@@ -929,32 +1072,39 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 # last entries are the final states -- set them to
                 # init_state_values
                 # for next batch
-                init_state_values = ret[3:]
-
+                fetched_vars = ret[3:3 + fetch_vars_len]
+                graded_vars = ret[3 + fetch_vars_len:3 + fetch_vars_len + grad_vars_len]
+                graded_para = ret[3 + fetch_vars_len + grad_vars_len:3 + fetch_vars_len + grad_vars_len + grad_para_len]
+                init_state_values = ret[3 + fetch_vars_len + grad_vars_len + grad_para_len:]
             else:
                 # also run the histogram summaries
                 ret = sess.run(
-                    [train_op, summary_op, train_perplexity, hist_summary_op] + 
+                    [train_op, summary_op, train_perplexity, hist_summary_op] + fetch_vars + grad_vars + 
                                                 final_state_tensors,
                     feed_dict=feed_dict
                 )
-                init_state_values = ret[4:]
-                
-
+                fetched_vars = ret[4:4 + fetch_vars_len]
+                graded_vars = ret[4 + fetch_vars_len:4 + fetch_vars_len + grad_vars_len]
+                graded_para = ret[4 + fetch_vars_len + grad_vars_len:4 + fetch_vars_len + grad_vars_len + grad_para_len]
+                init_state_values = ret[4 + fetch_vars_len + grad_vars_len + grad_para_len:]
             if batch_no % args.log_interval == 0:
                 #summary_writer.add_summary(ret[3], batch_no)
-                import logging
-                logger = logging.getLogger("lm")
-                print_num_of_total_parameters(sess, logger, args)
+                print_debug_info(sess, logger, vars_data=(fetch_vars, fetched_vars), grad_data=(grad_vars, graded_vars), grad_para_data=(para, graded_para), args=args)
                 # write the summaries to tensorboard and display perplexity
                 summary_writer.add_summary(ret[1], batch_no)
                 print("Batch %s, train_perplexity=%s" % (batch_no, ret[2]))
+                #print(sess.run(global_step))
                 print("Total time: %s" % (time.time() - t1))
 
             if (batch_no % 1250 == 0) or (batch_no == n_batches_total):
                 # save the model
                 checkpoint_path = os.path.join(tf_save_dir, 'model.ckpt')
                 saver.save(sess, checkpoint_path, global_step=global_step)
+
+            if batch_no > 100 and args.para_print:
+                exit(0)
+            if batch_no > 0 and args.detail:
+                exit(0)
 
             if batch_no == n_batches_total:
                 # done training!
