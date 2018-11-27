@@ -63,7 +63,7 @@ def var_print(tag, p_array, p_name, name, logger, args):
 	logger.info(" ".join([tag + "[", p_name, '] shape [', str(p_array.shape), ']', str(p_array)]))
 
 def print_num_of_total_parameters(sess, logger, args):
-    if not args.debug_print:
+    if not args.para_print:
 	return
     init_slot()
     total_parameters = 0
@@ -942,7 +942,8 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 
 
             if batch_no % args.log_interval == 0:
-                summary_writer.add_summary(ret[3], batch_no)
+                #summary_writer.add_summary(ret[3], batch_no)
+                import logging
                 logger = logging.getLogger("lm")
                 print_num_of_total_parameters(sess, logger, args)
                 # write the summaries to tensorboard and display perplexity
