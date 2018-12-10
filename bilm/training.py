@@ -72,7 +72,7 @@ def update_slot(slots, p_array):
 
 def record_slot(logger):
     for slot in slot_dict:
-        logger.info("slot:" + "\t".join([str(x) for x in [slot] + slot_dict[slot]]))
+        logger.info("slot:" + "\t".join([str(round(x, 10)) for x in [slot] + slot_dict[slot]]))
 
 def var_print(tag, p_array, p_name, name, logger, args):
     try:
@@ -189,9 +189,10 @@ class LanguageModel(object):
         'dim' is the hidden state size.
         Set 'dim' == 'projection_dim' to skip a projection layer.
     '''
-    def __init__(self, options, is_training):
+    def __init__(self, options, is_training, logger):
         self.options = options
         self.is_training = is_training
+        self.logger = logger
         self.bidirectional = options.get('bidirectional', False)
 
         # for the loss function
@@ -270,12 +271,13 @@ class LanguageModel(object):
         use_skip_connections = self.options['lstm'].get(
                                             'use_skip_connections')
         if use_skip_connections:
-            print("USING SKIP CONNECTIONS")
+            self.logger.info("USING SKIP CONNECTIONS")
         if self.options['para_init']:
             init = tf.constant_initializer(self.options['init1'])
         else:
             init=None
         self.lstm_outputs = []
+        self.lstm_unpack = []
         for lstm_num, lstm_input in enumerate(self.lstm_inputs):
             lstm_cells = []
             for i in range(n_lstm_layers):
@@ -330,8 +332,9 @@ class LanguageModel(object):
                 self.final_lstm_state.append(final_state)
 
             # (batch_size * unroll_steps, 512)
-            lstm_output_flat = tf.reshape(
-                tf.stack(_lstm_output_unpacked, axis=1), [-1, projection_dim])
+            lstm_output_stack = tf.stack(_lstm_output_unpacked, axis=1)
+            lstm_output_flat = tf.reshape(lstm_output_stack[:, :, 6:6+projection_dim], [-1, projection_dim])
+            #lstm_output_flat = tf.reshape(lstm_output_stack, [-1, projection_dim])
             #lstm_output_flat = _lstm_output_unpacked
             if self.is_training:
                 # add dropout to output
@@ -340,6 +343,7 @@ class LanguageModel(object):
             tf.add_to_collection('lstm_output_embeddings',
                 _lstm_output_unpacked)
 
+            self.lstm_unpack.append(lstm_output_stack)
             self.lstm_outputs.append(lstm_output_flat)
 
         self._build_loss(self.lstm_outputs)
@@ -400,6 +404,7 @@ class LanguageModel(object):
         # now calculate losses
         # loss for each direction of the LSTM
         self.individual_losses = []
+        self.losses = []
 
         if self.bidirectional:
             next_ids = [self.next_token_id, self.next_token_id_reverse]
@@ -421,12 +426,16 @@ class LanguageModel(object):
                 # NOTE: tf.nn.sparse_softmax_cross_entropy_with_logits
                 #   expects unnormalized output since it performs the
                 #   softmax internally
-                #losses = tf.reduce_mean(lstm_output_flat)
+                #losses = tf.reduce_mean(lstm_output_flat) + tf.reduce_mean(output_scores)
+
+                #'''
                 losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
                     logits=output_scores,
                     labels=tf.squeeze(next_token_id_flat, squeeze_dims=[1])
                 )
-
+                #'''
+                
+                self.losses.append(losses)
             self.individual_losses.append(tf.reduce_mean(losses))
 
         # now make the total loss -- it's the mean of the individual losses
@@ -467,7 +476,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
     logger = logging.getLogger("lm")
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+    #formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
@@ -476,7 +485,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
     logger.info(str(args))
     logger.info(str(options))
     # not restarting so save the options
-    if restart_ckpt_file is None:
+    if restart_ckpt_file is None and tf_save_dir:
         with open(os.path.join(tf_save_dir, 'options.json'), 'w') as fout:
             fout.write(json.dumps(options))
 
@@ -492,8 +501,8 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             optimizer = tf.train.RMSPropOptimizer(
                 learning_rate=args.learning_rate)
         else:
-            opt = tf.train.AdagradOptimizer(learning_rate=0.2,
-                                        initial_accumulator_value=1.0e-5)
+            opt = tf.train.AdagradOptimizer(learning_rate=lr,
+                                        initial_accumulator_value=1.0e-100)
 
         # calculate the gradients on each GPU
         tower_grads = []
@@ -506,7 +515,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 with tf.variable_scope('lm', reuse=k > 0):
                     # calculate the loss for one model replica and get
                     #   lstm states
-                    model = LanguageModel(options, True)
+                    model = LanguageModel(options, True, logger)
                     loss = model.total_loss
                     models.append(model)
                     # get gradients
@@ -538,6 +547,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         # load the checkpoint data if needed
         if restart_ckpt_file is not None:
             loader = tf.train.Saver()
+            logger.info('load from checkpoint {}'.format(restart_ckpt_file))
             loader.restore(sess, restart_ckpt_file)
             
         # For each batch:
@@ -556,9 +566,15 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
         n_batches_per_epoch = int(n_train_tokens / n_tokens_per_batch)
         n_batches_total = options['n_epochs'] * n_batches_per_epoch
         print_debug_info(sess, logger, args=args)
+        if tf_save_dir:
+            saver = tf.train.Saver(tf.global_variables(), max_to_keep=2)
+            checkpoint_path = os.path.join(tf_save_dir, 'model_test.ckpt')
+            logger.info('save to checkpoint {}'.format(checkpoint_path))
+            saver.save(sess, checkpoint_path, global_step=0)
+
         save_para(sess, logger, args)
 
-        print("Training for %s epochs and %s batches" % (
+        logger.info("Training for %s epochs and %s batches" % (
             options['n_epochs'], n_batches_total))
 
         # get the initial lstm states
@@ -573,20 +589,26 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             fetch_vars.append(model.token_ids)
             fetch_vars.append(model.token_ids_reverse)
             fetch_vars.extend(model.lstm_inputs)
+            fetch_vars.extend(model.lstm_unpack)
             fetch_vars.extend(model.lstm_outputs)
             fetch_vars.extend(model.individual_losses)
             grad_vars.extend(model.lstm_inputs)
+            grad_vars.extend(model.lstm_unpack)
             grad_vars.extend(model.lstm_outputs)
+            grad_vars.extend(model.losses)
             grad_vars.extend(model.individual_losses)
             para = tf.trainable_variables()
-            #grad_vars.extend(grads)
-            #grad_vars.extend(grads2)
+            grad_vars = tf.gradients(ys=model.total_loss * options['unroll_steps'], xs=grad_vars)
+            tmp = []
+            for g,v in grads2:
+                if not(g is None):
+                    tmp.append(g)
+            grad_vars.extend(tmp)
            
-            grad_vars = tf.gradients(ys=model.total_loss, xs=grad_vars)
             if args.optim == 'adagrad':
                 opt_slot = [opt.get_slot(v, 'accumulator') for v in para]
                 grad_vars.extend(opt_slot)
-            grad_para = tf.gradients(ys=model.total_loss, xs=para)
+            grad_para = tf.gradients(ys=model.total_loss * options['unroll_steps'], xs=para)
 
             i = i + 1
 
@@ -639,16 +661,24 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             graded_vars = ret[2 + fetch_vars_len:2 + fetch_vars_len + grad_vars_len]
             graded_para = ret[2 + fetch_vars_len + grad_vars_len:2 + fetch_vars_len + grad_vars_len + grad_para_len]
             init_state_values = ret[2 + fetch_vars_len + grad_vars_len + grad_para_len:]
+            def flatten(a):
+                res = [y for x in a for y in x]
+                return res
+
+            k = final_state_tensors
+            v = init_state_values
+            k = flatten(flatten(k))
+            v = flatten(flatten(v))
             if batch_no % args.log_interval == 0:
-                print_debug_info(sess, logger, vars_data=(fetch_vars, fetched_vars), grad_data=(grad_vars, graded_vars), grad_para_data=(para, graded_para), args=args)
+                print_debug_info(sess, logger, vars_data=(fetch_vars + k, fetched_vars + v), grad_data=(grad_vars, graded_vars), grad_para_data=(para, graded_para), args=args)
                 # write the summaries to tensorboard and display perplexity
-                print("Batch %s, train_perplexity=%s" % (batch_no, ret[2]))
-                print("Total time: %s" % (time.time() - t1))
+                logger.info("Batch %s, train ppl %s" % (batch_no, ret[1]))
+                logger.info("Total time: %s" % (time.time() - t1))
 
 
             if batch_no > 100 and args.para_print:
                 exit(0)
-            if batch_no > 0 and args.detail:
+            if batch_no > 100 and args.detail:
                 exit(0)
 
             if batch_no == n_batches_total:
@@ -672,7 +702,7 @@ def test(options, ckpt_file, data, batch_size=256):
             # batch is bounded above batch_size * unroll_steps
             test_options['batch_size'] = batch_size
             test_options['unroll_steps'] = 1
-            model = LanguageModel(test_options, False)
+            model = LanguageModel(test_options, False, logger)
             # we use the "Saver" class to load the variables
             loader = tf.train.Saver()
             loader.restore(sess, ckpt_file)
@@ -722,11 +752,11 @@ def test(options, ckpt_file, data, batch_size=256):
             total_loss += loss
             avg_perplexity = np.exp(total_loss / batch_no)
 
-            print("batch=%s, batch_perplexity=%s, avg_perplexity=%s, time=%s" %
+            logger.info("batch=%s, batch_perplexity=%s, avg_perplexity=%s, time=%s" %
                 (batch_no, batch_perplexity, avg_perplexity, time.time() - t1))
 
     avg_loss = np.mean(batch_losses)
-    print("FINSIHED!  AVERAGE PERPLEXITY = %s" % np.exp(avg_loss))
+    logger.info("FINSIHED!  AVERAGE PERPLEXITY = %s" % np.exp(avg_loss))
 
     return np.exp(avg_loss)
 

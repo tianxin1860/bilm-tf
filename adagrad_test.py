@@ -77,7 +77,7 @@ class AdagradOptimizerTest(test.TestCase):
    2.2079140e-08,  2.2079140e-08,  1.8463071e-09,  1.8463071e-09,
    1.8463071e-09,  2.0333456e-08,  2.0333456e-08,  2.0333456e-08], dtype=dtype)
         import tensorflow as tf 
-        ada_opt = tf.train.GradientDescentOptimizer(learning_rate=1000)
+        ada_opt = tf.train.GradientDescentOptimizer(learning_rate=1.0e20)
         #ada_opt = tensorflow.train.AdagradOptimizer(
         #    0.2, initial_accumulator_value=1.0e-5, use_locking=use_locking)
         ada_update = ada_opt.apply_gradients(
