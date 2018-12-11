@@ -502,7 +502,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 learning_rate=args.learning_rate)
         else:
             opt = tf.train.AdagradOptimizer(learning_rate=lr,
-                                        initial_accumulator_value=1.0e-100)
+                                        initial_accumulator_value=1.0)
 
         # calculate the gradients on each GPU
         tower_grads = []

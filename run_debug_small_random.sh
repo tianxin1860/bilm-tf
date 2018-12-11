@@ -14,5 +14,5 @@ python bin/train_elmo.py \
 	--detail \
 	--n_layers 2 \
 	--n_steps 5 \
-	--load_dir output/checkout_random/model_test.ckpt-0 \
+	--load_dir output/checkout_random2/model_test.ckpt-0 \
 	$@
