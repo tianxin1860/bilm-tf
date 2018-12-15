@@ -466,6 +466,62 @@ def _get_feed_dict_from_X(X, start, end, model, bidirectional):
     return feed_dict
 
 
+def clip_by_global_norm_summary(t_list, clip_norm, norm_name, variables):
+    # wrapper around tf.clip_by_global_norm that also does summary ops of norms
+
+    # compute norms
+    # use global_norm with one element to handle IndexedSlices vs dense
+    norms = [tf.global_norm([t]) for t in t_list]
+
+    # summary ops before clipping
+    summary_ops = []
+    for ns, v in zip(norms, variables):
+        name = 'norm_pre_clip/' + v.name.replace(":", "_")
+        summary_ops.append(tf.summary.scalar(name, ns))
+
+    # clip 
+    clipped_t_list, tf_norm = tf.clip_by_global_norm(t_list, clip_norm)
+
+    # summary ops after clipping
+    norms_post = [tf.global_norm([t]) for t in clipped_t_list]
+    for ns, v in zip(norms_post, variables):
+        name = 'norm_post_clip/' + v.name.replace(":", "_")
+        summary_ops.append(tf.summary.scalar(name, ns))
+
+    summary_ops.append(tf.summary.scalar(norm_name, tf_norm))
+
+    return clipped_t_list, tf_norm, summary_ops
+
+
+def clip_grads(grads, options, do_summaries, global_step):
+    # grads = [(grad1, var1), (grad2, var2), ...]
+    def _clip_norms(grad_and_vars, val, name):
+        # grad_and_vars is a list of (g, v) pairs
+        grad_tensors = [g for g, v in grad_and_vars]
+        vv = [v for g, v in grad_and_vars]
+        scaled_val = val
+        if do_summaries:
+            clipped_tensors, g_norm, so = clip_by_global_norm_summary(
+                grad_tensors, scaled_val, name, vv)
+        else:
+            so = []
+            clipped_tensors, g_norm = tf.clip_by_global_norm(
+                grad_tensors, scaled_val)
+
+        ret = []
+        for t, (g, v) in zip(clipped_tensors, grad_and_vars):
+            ret.append((t, v))
+
+        return ret, so
+
+    all_clip_norm_val = options['all_clip_norm_val']
+    ret, summary_ops = _clip_norms(grads, all_clip_norm_val, 'norm_grad')
+
+    assert len(ret) == len(grads)
+
+    return ret, summary_ops
+
+
 def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
           restart_ckpt_file=None, args=None):
     import random
@@ -490,6 +546,10 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             fout.write(json.dumps(options))
 
     with tf.device('/gpu:0'):
+	with tf.device('/gpu:0'):
+	    global_step = tf.get_variable(
+		'global_step', [],
+		initializer=tf.constant_initializer(0), trainable=False)
         # set up the optimizer
         lr = args.learning_rate
         if args.optim == 'sgd':
@@ -528,7 +588,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                     train_perplexity += loss
 
         # calculate the mean of each gradient across all GPUs
-        grads2=grads
+        grads2, norm_summary_ops = clip_grads(grads, options, True, global_step)
 
         # log the training perplexity
         train_perplexity = tf.exp(train_perplexity / n_gpus)
