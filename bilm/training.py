@@ -285,7 +285,7 @@ class LanguageModel(object):
                     # are projecting down output
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim, num_proj=projection_dim,
-                        forget_bias=0.0, initializer=init)
+                        forget_bias=0.0, initializer=init, cell_clip=cell_clip, proj_clip=proj_clip)
                 else:
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim,

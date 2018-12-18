@@ -29,7 +29,7 @@ def main(args):
       'projection_dim': args.projection_dim,
       'use_skip_connections': True},
     
-     'all_clip_norm_val': 1000000000.0,
+     'all_clip_norm_val': 10.0,
     
      'n_epochs': 10,
      'n_train_tokens': n_train_tokens,
