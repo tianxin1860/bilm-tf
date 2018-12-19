@@ -39,14 +39,32 @@ def main(args):
      'para_init':args.para_init,
      'init1':args.init1
     }
+ 
+    import random
+    random.seed(args.random_seed)
+    np.random.seed(args.random_seed)
+    import tensorflow as tf
+    tf.set_random_seed(args.random_seed)
+    import logging
+    logger = logging.getLogger("lm")
+    logger.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    #formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    logger.info(str(args))
+    logger.info(str(options))
 
     prefix = args.train_prefix
-    data = BidirectionalLMDataset(prefix, vocab, test=False,
+    data = BidirectionalLMDataset(prefix, vocab, test=True,
                                       shuffle_on_load=False)
 
     tf_save_dir = args.save_dir
     tf_log_dir = args.save_dir
-    train(options, data, n_gpus, tf_save_dir, tf_log_dir, restart_ckpt_file=args.load_dir, args=args)
+    train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger, restart_ckpt_file=args.load_dir, args=args)
 
 
 if __name__ == '__main__':

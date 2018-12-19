@@ -333,7 +333,9 @@ class LanguageModel(object):
 
             # (batch_size * unroll_steps, 512)
             lstm_output_stack = tf.stack(_lstm_output_unpacked, axis=1)
-            lstm_output_flat = tf.reshape(lstm_output_stack[:, :, 6:6+projection_dim], [-1, projection_dim])
+            #refer to rnn_cell_impl.py start maybe be wrong
+            start = (n_lstm_layers-1)*projection_dim
+            lstm_output_flat = tf.reshape(lstm_output_stack[:, :, start:start+projection_dim], [-1, projection_dim])
             #lstm_output_flat = tf.reshape(lstm_output_stack, [-1, projection_dim])
             #lstm_output_flat = _lstm_output_unpacked
             if self.is_training:
@@ -405,6 +407,7 @@ class LanguageModel(object):
         # loss for each direction of the LSTM
         self.individual_losses = []
         self.losses = []
+        self.output_scores = []
 
         if self.bidirectional:
             next_ids = [self.next_token_id, self.next_token_id_reverse]
@@ -435,6 +438,7 @@ class LanguageModel(object):
                 )
                 #'''
                 
+                self.output_scores.append(output_scores)
                 self.losses.append(losses)
             self.individual_losses.append(tf.reduce_mean(losses))
 
@@ -522,22 +526,8 @@ def clip_grads(grads, options, do_summaries, global_step):
     return ret, summary_ops
 
 
-def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
+def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
           restart_ckpt_file=None, args=None):
-    import random
-    random.seed(args.random_seed)
-    np.random.seed(args.random_seed)
-    tf.set_random_seed(args.random_seed)
-    import logging
-    logger = logging.getLogger("lm")
-    logger.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    #formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    
     logger.info(str(args))
     logger.info(str(options))
     # not restarting so save the options
@@ -651,10 +641,12 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             fetch_vars.extend(model.lstm_inputs)
             fetch_vars.extend(model.lstm_unpack)
             fetch_vars.extend(model.lstm_outputs)
+            fetch_vars.extend(model.output_scores)
             fetch_vars.extend(model.individual_losses)
             grad_vars.extend(model.lstm_inputs)
             grad_vars.extend(model.lstm_unpack)
             grad_vars.extend(model.lstm_outputs)
+            grad_vars.extend(model.output_scores)
             grad_vars.extend(model.losses)
             grad_vars.extend(model.individual_losses)
             para = tf.trainable_variables()
