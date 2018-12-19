@@ -517,7 +517,8 @@ class LanguageModel(object):
                     # are projecting down output
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim, num_proj=projection_dim,
-                        forget_bias=0.0, initializer=init)
+                        cell_clip=cell_clip, proj_clip=proj_clip, forget_bias=0.0, initializer=init)
+                        #forget_bias=0.0, initializer=init)
                         #cell_clip=cell_clip, proj_clip=proj_clip, forget_bias=0.0, initializer=init)
                 else:
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
@@ -847,7 +848,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
             fout.write(json.dumps(options))
 
     with tf.device('/gpu:0'):
-        '''
+        #'''
         global_step = tf.get_variable(
             'global_step', [],
             initializer=tf.constant_initializer(0), trainable=False)
@@ -864,7 +865,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                 learning_rate=args.learning_rate)
         else:
             opt = tf.train.AdagradOptimizer(learning_rate=0.2,
-                                        initial_accumulator_value=1.0e-5)
+                                        initial_accumulator_value=1.0)
 
         # calculate the gradients on each GPU
         tower_grads = []
@@ -892,8 +893,8 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
                     train_perplexity += loss
 
         # calculate the mean of each gradient across all GPUs
-        #grads = average_gradients(tower_grads, options['batch_size'], options)
-        #grads2, norm_summary_ops = clip_grads(grads, options, True, global_step)
+        grads = average_gradients(tower_grads, options['batch_size'], options)
+        grads2, norm_summary_ops = clip_grads(grads, options, True, global_step)
         grads2=grads
         #norm_summaries.extend(norm_summary_ops)
 

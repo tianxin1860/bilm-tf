@@ -391,9 +391,8 @@ class LMDataset(object):
             sentences_raw = f.readlines()
             new = []
             for x in sentences_raw:
-                try: 
-                    x.strip().decode(encoding='utf-8')
-                    new.append(x)
+                try:
+                    new.append(x.strip().decode(encoding='utf-8'))
                 except:
                     print('error encoding {}'.format(x))
                     continue
