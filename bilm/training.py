@@ -642,6 +642,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             fetch_vars.extend(model.lstm_unpack)
             fetch_vars.extend(model.lstm_outputs)
             fetch_vars.extend(model.output_scores)
+            fetch_vars.extend(model.losses)
             fetch_vars.extend(model.individual_losses)
             grad_vars.extend(model.lstm_inputs)
             grad_vars.extend(model.lstm_unpack)
@@ -681,6 +682,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
 
         t1 = time.time()
         data_gen = data.iter_batches(batch_size * n_gpus, unroll_steps)
+        n_batch_loss = 0.0
         for batch_no, batch in enumerate(data_gen, start=1):
 
             # slice the input in the batch for the feed_dict
@@ -721,12 +723,13 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             v = init_state_values
             k = flatten(flatten(k))
             v = flatten(flatten(v))
+            n_batch_loss += np.log(ret[1])
             if batch_no % args.log_interval == 0:
                 print_debug_info(sess, logger, vars_data=(fetch_vars + k, fetched_vars + v), grad_data=(grad_vars, graded_vars), grad_para_data=(para, graded_para), args=args)
                 # write the summaries to tensorboard and display perplexity
-                logger.info("Batch %s, train ppl %s" % (batch_no, ret[1]))
+                logger.info("Batch %s, train ppl %s" % (batch_no, np.exp(n_batch_loss/args.log_interval)))
                 logger.info("Total time: %s" % (time.time() - t1))
-
+                n_batch_loss = 0.0
 
             if batch_no > 100 and args.para_print:
                 exit(0)
