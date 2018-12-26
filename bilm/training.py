@@ -199,7 +199,7 @@ class LanguageModel(object):
         self.share_embedding_softmax = options.get(
             'share_embedding_softmax', False)
 
-        self.sample_softmax = options.get('sample_softmax', False)
+        self.sample_softmax = options.get('sample_softmax', True)
 
         self._build()
 
@@ -430,15 +430,10 @@ class LanguageModel(object):
                 # NOTE: tf.nn.sparse_softmax_cross_entropy_with_logits
                 #   expects unnormalized output since it performs the
                 #   softmax internally
-                #losses = tf.reduce_mean(lstm_output_flat) + tf.reduce_mean(output_scores)
-
-                #'''
                 losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
                     logits=output_scores,
                     labels=tf.squeeze(next_token_id_flat, squeeze_dims=[1])
                 )
-                #'''
-                
                 self.output_scores.append(output_scores)
                 self.losses.append(losses)
             self.individual_losses.append(tf.reduce_mean(losses))

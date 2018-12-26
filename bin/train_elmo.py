@@ -1,4 +1,3 @@
-
 import argparse
 
 import numpy as np
@@ -39,6 +38,7 @@ def main(args):
      'para_init':args.para_init,
      'init1':args.init1,
      'debug_rnn':args.debug_rnn,
+     'sample_softmax':args.sample_softmax,
     }
  
     import random
@@ -91,6 +91,7 @@ if __name__ == '__main__':
     parser.add_argument('--detail', action='store_true')
     parser.add_argument('--para_init', action='store_true')
     parser.add_argument('--debug_rnn', action='store_true')
+    parser.add_argument('--sample_softmax', action='store_true')
     parser.add_argument('--init1', type=float, default=0.1)
 
     args = parser.parse_args()
