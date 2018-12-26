@@ -37,7 +37,8 @@ def main(args):
      'n_tokens_vocab': vocab.size,
      'unroll_steps': args.n_steps,
      'para_init':args.para_init,
-     'init1':args.init1
+     'init1':args.init1,
+     'debug_rnn':args.debug_rnn,
     }
  
     import random
@@ -89,6 +90,7 @@ if __name__ == '__main__':
     parser.add_argument('--optim', type=str, default='adagrad')
     parser.add_argument('--detail', action='store_true')
     parser.add_argument('--para_init', action='store_true')
+    parser.add_argument('--debug_rnn', action='store_true')
     parser.add_argument('--init1', type=float, default=0.1)
 
     args = parser.parse_args()
