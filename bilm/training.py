@@ -77,9 +77,9 @@ def record_slot(logger):
 def var_print(tag, p_array, p_name, name, logger, args):
     try:
         if isinstance(p_array,np.float32):
-	    p_array=np.array([p_array]) 
+            p_array=np.array([p_array]) 
         if not isinstance(p_array, np.ndarray):
-	    p_array = p_array.values
+            p_array = p_array.values
         param_num = np.prod(p_array.shape)
     except:
         import pdb; pdb.set_trace()
@@ -89,11 +89,11 @@ def var_print(tag, p_array, p_name, name, logger, args):
     p_array3 = np.multiply(np.multiply(p_array, p_array), p_array)
     logger.info(tag + ": {0} ({1}),  l3={2} sum={3}  max={4}  min={5} mean={6} num={7} {8}".format(p_name, name, p_array3.sum(), p_array.sum(), p_array.max(), p_array.min(), p_array.mean(), p_array.shape, param_num))
     if args.detail:
-	logger.info(" ".join([tag + "[", p_name, '] shape [', str(p_array.shape), ']', str(p_array)]))
+        logger.info(" ".join([tag + "[", p_name, '] shape [', str(p_array.shape), ']', str(p_array)]))
 
 def print_debug_info(sess, logger, vars_data=None, grad_data=None, grad_para_data=None, args=None):
     if not args.para_print:
-	return
+        return
     if vars_data:
         vars, fetched_vars = vars_data
         for var, fetched_var in zip(vars, fetched_vars):
@@ -135,16 +135,16 @@ def print_debug_info(sess, logger, vars_data=None, grad_data=None, grad_para_dat
     parameters_string = ""
     
     for variable in tf.trainable_variables():
-	shape = variable.get_shape()
-	p_array = sess.run(variable.name)
-	slots = name2slot(variable.name)
-	if slots:
-	    update_slot(slots, p_array)
-	variable_parameters = 1
-	for dim in shape:
-	    variable_parameters *= dim.value
-	total_parameters += variable_parameters
-	var_print('para', p_array, variable.name, variable.name, logger, args)
+        shape = variable.get_shape()
+        p_array = sess.run(variable.name)
+        slots = name2slot(variable.name)
+        if slots:
+            update_slot(slots, p_array)
+        variable_parameters = 1
+        for dim in shape:
+            variable_parameters *= dim.value
+        total_parameters += variable_parameters
+        var_print('para', p_array, variable.name, variable.name, logger, args)
     record_slot(logger)
     logger.info("Total %d variables, %s params" % (len(tf.trainable_variables()), "{:,}".format(total_parameters)))
 
@@ -160,8 +160,8 @@ def save_var(p_array, name, logger, args):
 
 def save_para(sess, logger, args=None):
     for variable in tf.trainable_variables():
-	p_array = sess.run(variable.name)
-	save_var(p_array, variable.name, logger, args)
+        p_array = sess.run(variable.name)
+        save_var(p_array, variable.name, logger, args)
 
 
 class LanguageModel(object):
@@ -285,7 +285,7 @@ class LanguageModel(object):
                     # are projecting down output
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim, num_proj=projection_dim,
-                        forget_bias=0.0, initializer=init, cell_clip=cell_clip, proj_clip=proj_clip)
+                        initializer=init, cell_clip=cell_clip, proj_clip=proj_clip)
                 else:
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim,
@@ -422,20 +422,29 @@ class LanguageModel(object):
             next_token_id_flat = tf.reshape(id_placeholder, [-1, 1])
 
             with tf.control_dependencies([lstm_output_flat]):
-                # get the full softmax loss
-                output_scores = tf.matmul(
-                    lstm_output_flat,
-                    tf.transpose(self.softmax_W)
-                ) + self.softmax_b
-                # NOTE: tf.nn.sparse_softmax_cross_entropy_with_logits
-                #   expects unnormalized output since it performs the
-                #   softmax internally
-                losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    logits=output_scores,
-                    labels=tf.squeeze(next_token_id_flat, squeeze_dims=[1])
-                )
-                self.output_scores.append(output_scores)
-                self.losses.append(losses)
+                if self.is_training and self.sample_softmax:
+                    losses = tf.nn.sampled_softmax_loss(
+                                   self.softmax_W, self.softmax_b,
+                                   next_token_id_flat, lstm_output_flat,
+                                   self.options['n_negative_samples_batch'],
+                                   self.options['n_tokens_vocab'],
+                                   num_true=1)
+
+                else:
+                    # get the full softmax loss
+                    output_scores = tf.matmul(
+                        lstm_output_flat,
+                        tf.transpose(self.softmax_W)
+                    ) + self.softmax_b
+                    # NOTE: tf.nn.sparse_softmax_cross_entropy_with_logits
+                    #   expects unnormalized output since it performs the
+                    #   softmax internally
+                    losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                        logits=output_scores,
+                        labels=tf.squeeze(next_token_id_flat, squeeze_dims=[1])
+                    )
+                    self.output_scores.append(output_scores)
+                    self.losses.append(losses)
             self.individual_losses.append(tf.reduce_mean(losses))
 
         # now make the total loss -- it's the mean of the individual losses
@@ -532,10 +541,10 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             fout.write(json.dumps(options))
 
     with tf.device('/gpu:0'):
-	with tf.device('/gpu:0'):
-	    global_step = tf.get_variable(
-		'global_step', [],
-		initializer=tf.constant_initializer(0), trainable=False)
+        with tf.device('/gpu:0'):
+            global_step = tf.get_variable(
+                'global_step', [],
+                initializer=tf.constant_initializer(0), trainable=False)
         # set up the optimizer
         lr = args.learning_rate
         if args.optim == 'sgd':

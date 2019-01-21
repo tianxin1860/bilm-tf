@@ -6,9 +6,9 @@ import numpy as np
 
 # from typing import List
 
-import sys
-reload(sys)
-sys.setdefaultencoding('utf8')
+#import sys
+#reload(sys)
+#sys.setdefaultencoding('utf8')
 
 
 class Vocabulary(object):
@@ -28,10 +28,10 @@ class Vocabulary(object):
         self._bos = -1
         self._eos = -1
 
-        with open(filename) as f:
+        with open(filename, encoding='utf-8') as f:
             idx = 0
             for line in f:
-                word_name = line.strip().decode(encoding='utf-8')
+                word_name = line.strip()
                 if word_name == '<S>':
                     self._bos = idx
                 elif word_name == '</S>':
@@ -387,16 +387,8 @@ class LMDataset(object):
             list of (id, char_id) tuples.
         """
         print('Loading data from: %s' % shard_name)
-        with open(shard_name) as f:
+        with open(shard_name, encoding='utf-8') as f:
             sentences_raw = f.readlines()
-            new = []
-            for x in sentences_raw:
-                try:
-                    new.append(x.strip().decode(encoding='utf-8'))
-                except:
-                    print('error encoding {}'.format(x))
-                    continue
-            sentences_raw = new
 
         if self._reverse:
             sentences = []
@@ -465,14 +457,12 @@ class BidirectionalLMDataset(object):
     def iter_batches(self, batch_size, num_steps):
         max_word_length = self._data_forward.max_word_length
 
-        while True:
-            try:
-                X = _get_batch(self._data_forward.get_sentence(), batch_size,
-                      num_steps, max_word_length).next()
-                Xr = _get_batch(self._data_reverse.get_sentence(), batch_size,
-                      num_steps, max_word_length).next()
-            except StopIteration:
-                break
+        for X, Xr in zip(
+            _get_batch(self._data_forward.get_sentence(), batch_size,
+                      num_steps, max_word_length),
+            _get_batch(self._data_reverse.get_sentence(), batch_size,
+                      num_steps, max_word_length)
+            ):
 
             for k, v in Xr.items():
                 X[k + '_reverse'] = v

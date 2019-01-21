@@ -34,6 +34,7 @@ def main(args):
      'n_train_tokens': n_train_tokens,
      'batch_size': args.batch_size,
      'n_tokens_vocab': vocab.size,
+     'n_negative_samples_batch': 8000,
      'unroll_steps': args.n_steps,
      'para_init':args.para_init,
      'init1':args.init1,
@@ -60,8 +61,8 @@ def main(args):
     logger.info(str(options))
 
     prefix = args.train_prefix
-    data = BidirectionalLMDataset(prefix, vocab, test=True,
-                                      shuffle_on_load=False)
+    data = BidirectionalLMDataset(prefix, vocab, test=False,
+                                      shuffle_on_load=True)
 
     tf_save_dir = args.save_dir
     tf_log_dir = args.save_dir
@@ -70,7 +71,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--save_dir', help='Location of checkpoint files')
+    parser.add_argument('--save_dir', help='Location of checkpoint files',default='output')
     parser.add_argument('--load_dir', help='Location of checkpoint files')
     parser.add_argument('--vocab_file', help='Vocabulary file')
     parser.add_argument('--train_prefix', help='Prefix for train files')

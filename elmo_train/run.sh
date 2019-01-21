@@ -37,6 +37,7 @@ echo $PATH >> $PWD_DIR/log/info.log
 python -c 'import sys; print(sys.path)' >> $PWD_DIR/log/info.log
 echo $WORK_DIR >> $PWD_DIR/log/info.log
 
+export CUDA_VISIBLE_DEVICES=0
 DATA_PKG=baike
 python3 src/train_elmo_mini.py \
         --save_dir "$PWD_DIR/output/models" \
