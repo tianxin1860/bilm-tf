@@ -285,7 +285,7 @@ class LanguageModel(object):
                     # are projecting down output
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim, num_proj=projection_dim,
-                        initializer=init, cell_clip=cell_clip, proj_clip=proj_clip)
+                        forget_bias=0.0,initializer=init, cell_clip=cell_clip, proj_clip=proj_clip)
                 else:
                     lstm_cell = tf.nn.rnn_cell.LSTMCell(
                         lstm_dim,
@@ -736,8 +736,8 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
                 logger.info("Total time: %s" % (time.time() - t1))
                 n_batch_loss = 0.0
 
-            if batch_no > 100 and args.para_print:
-                exit(0)
+            #if batch_no > 100 and args.para_print:
+            #    exit(0)
             if batch_no > 100 and args.detail:
                 exit(0)
 

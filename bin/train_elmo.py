@@ -34,7 +34,7 @@ def main(args):
      'n_train_tokens': n_train_tokens,
      'batch_size': args.batch_size,
      'n_tokens_vocab': vocab.size,
-     'n_negative_samples_batch': 8000,
+     'n_negative_samples_batch': args.n_negative_samples_batch,
      'unroll_steps': args.n_steps,
      'para_init':args.para_init,
      'init1':args.init1,
@@ -61,8 +61,8 @@ def main(args):
     logger.info(str(options))
 
     prefix = args.train_prefix
-    data = BidirectionalLMDataset(prefix, vocab, test=False,
-                                      shuffle_on_load=True)
+    data = BidirectionalLMDataset(prefix, vocab, test=(not args.shuffle),
+                                      shuffle_on_load=args.shuffle)
 
     tf_save_dir = args.save_dir
     tf_log_dir = args.save_dir
@@ -83,6 +83,7 @@ if __name__ == '__main__':
     parser.add_argument('--projection_dim', type=int, default=512)
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--lstm_dim', type=int, default=4096)
+    parser.add_argument('--n_negative_samples_batch', type=int, default=8000)
     parser.add_argument('--n_steps', type=int, default=20)
     parser.add_argument('--dropout', type=float, default=0.0)
     parser.add_argument('--learning_rate', type=float, default=0.2)
@@ -94,6 +95,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug_rnn', action='store_true')
     parser.add_argument('--sample_softmax', action='store_true')
     parser.add_argument('--init1', type=float, default=0.1)
+    parser.add_argument('--shuffle', type=bool, default=False)
 
     args = parser.parse_args()
     main(args)

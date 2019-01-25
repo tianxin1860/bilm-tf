@@ -400,6 +400,7 @@ class LMDataset(object):
             sentences = sentences_raw
 
         if self._shuffle_on_load:
+            print('shuffle sentences')
             random.shuffle(sentences)
 
         ids = [self.vocab.encode(sentence, self._reverse)
