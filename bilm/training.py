@@ -429,7 +429,9 @@ class LanguageModel(object):
                                    self.options['n_negative_samples_batch'],
                                    self.options['n_tokens_vocab'],
                                    num_true=1)
-
+                    #a, b, c = sampled_values
+                    #self.output_scores.append(c)
+                    self.output_scores.append(losses)
                 else:
                     # get the full softmax loss
                     output_scores = tf.matmul(
@@ -444,7 +446,7 @@ class LanguageModel(object):
                         labels=tf.squeeze(next_token_id_flat, squeeze_dims=[1])
                     )
                     self.output_scores.append(output_scores)
-                    self.losses.append(losses)
+                self.losses.append(losses)
             self.individual_losses.append(tf.reduce_mean(losses))
 
         # now make the total loss -- it's the mean of the individual losses
@@ -454,7 +456,7 @@ class LanguageModel(object):
         else:
             self.total_loss = self.individual_losses[0]
 
-def _get_feed_dict_from_X(X, start, end, model, bidirectional):
+def _get_feed_dict_from_X(X, start, end, model, bidirectional, args=None):
     feed_dict = {}
     token_ids = X['token_ids'][start:end]
     feed_dict[model.token_ids] = token_ids
@@ -471,6 +473,27 @@ def _get_feed_dict_from_X(X, start, end, model, bidirectional):
     for id_placeholder, suffix in next_id_placeholders:
         name = 'next_token_id' + suffix
         feed_dict[id_placeholder] = X[name][start:end]
+
+    if args and args.use_custom_samples:
+       custom_samples_array = np.zeros(
+            (args.num_steps, args.n_negative_samples_batch + 1),
+            dtype='int64')
+       custom_samples_array_r = np.zeros(
+            (args.num_steps, args.n_negative_samples_batch + 1),
+            dtype='int64')
+       custom_probabilities_array = np.zeros(
+            (args.num_steps, args.n_negative_samples_batch + 1),
+            dtype='float32')
+       for j in range(args.num_steps):
+           for k in range(args.n_negative_samples_batch + 1):
+               custom_samples_array[j][k] = k
+               custom_samples_array_r[j][k] = k
+               custom_probabilities_array[j][k] = 1.0
+           custom_samples_array[j][0] = X['next_tocken_id'][j]
+           custom_samples_array_r[j][0] = X['next_tocken_id_reverse'][j]
+       feed_dict[model.custom_samples] = custom_samples_array
+       feed_dict[model.custom_samples_reverse] = custom_samples_array_r
+       feed_dict[model.custom_probabilities] = custom_probabilities_array
 
     return feed_dict
 
@@ -652,7 +675,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             grad_vars.extend(model.lstm_inputs)
             grad_vars.extend(model.lstm_unpack)
             grad_vars.extend(model.lstm_outputs)
-            grad_vars.extend(model.output_scores)
+            #grad_vars.extend(model.output_scores)
             grad_vars.extend(model.losses)
             grad_vars.extend(model.individual_losses)
             para = tf.trainable_variables()
