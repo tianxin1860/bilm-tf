@@ -41,13 +41,15 @@ def main(args):
      'debug_rnn':args.debug_rnn,
      'sample_softmax':args.sample_softmax,
     }
- 
+    if args.random_seed == 0:
+        args.random_seed = None 
     import random
     random.seed(args.random_seed)
     np.random.seed(args.random_seed)
     import tensorflow as tf
     tf.set_random_seed(args.random_seed)
     import logging
+  
     logger = logging.getLogger("lm")
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')

@@ -755,7 +755,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             if batch_no % args.log_interval == 0:
                 print_debug_info(sess, logger, vars_data=(fetch_vars + k, fetched_vars + v), grad_data=(grad_vars, graded_vars), grad_para_data=(para, graded_para), args=args)
                 # write the summaries to tensorboard and display perplexity
-                logger.info("Batch %s, train ppl %s" % (batch_no, np.exp(n_batch_loss/args.log_interval)))
+                logger.info("Batch %s, train ppl %s, smooth ppl %s" % (batch_no, np.exp(np.log(ret[1])), np.exp(n_batch_loss / args.log_interval)))
                 logger.info("Total time: %s" % (time.time() - t1))
                 n_batch_loss = 0.0
 
