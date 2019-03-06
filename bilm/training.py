@@ -456,6 +456,120 @@ class LanguageModel(object):
         else:
             self.total_loss = self.individual_losses[0]
 
+
+def average_gradients(tower_grads, batch_size, options):
+    # calculate average gradient for each shared variable across all GPUs
+    average_grads = []
+    for grad_and_vars in zip(*tower_grads):
+        # Note that each grad_and_vars looks like the following:
+        #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
+        # We need to average the gradients across each GPU.
+
+        g0, v0 = grad_and_vars[0]
+
+        if g0 is None:
+            # no gradient for this variable, skip it
+            average_grads.append((g0, v0))
+            continue
+
+        if isinstance(g0, tf.IndexedSlices):
+            # If the gradient is type IndexedSlices then this is a sparse
+            #   gradient with attributes indices and values.
+            # To average, need to concat them individually then create
+            #   a new IndexedSlices object.
+            indices = []
+            values = []
+            for g, v in grad_and_vars:
+                indices.append(g.indices)
+                values.append(g.values)
+            all_indices = tf.concat(indices, 0)
+            avg_values = tf.concat(values, 0) / len(grad_and_vars)
+            # deduplicate across indices
+            av, ai = _deduplicate_indexed_slices(avg_values, all_indices)
+            grad = tf.IndexedSlices(av, ai, dense_shape=g0.dense_shape)
+
+        else:
+            # a normal tensor can just do a simple average
+            grads = []
+            for g, v in grad_and_vars:
+                # Add 0 dimension to the gradients to represent the tower.
+                expanded_g = tf.expand_dims(g, 0)
+                # Append on a 'tower' dimension which we will average over
+                grads.append(expanded_g)
+
+            # Average over the 'tower' dimension.
+            grad = tf.concat(grads, 0)
+            grad = tf.reduce_mean(grad, 0)
+
+        # the Variables are redundant because they are shared
+        # across towers. So.. just return the first tower's pointer to
+        # the Variable.
+        v = grad_and_vars[0][1]
+        grad_and_var = (grad, v)
+
+        average_grads.append(grad_and_var)
+
+    assert len(average_grads) == len(list(zip(*tower_grads)))
+
+    return average_grads
+
+
+def summary_gradient_updates(grads, opt, lr):
+    '''get summary ops for the magnitude of gradient updates'''
+
+    # strategy:
+    # make a dict of variable name -> [variable, grad, adagrad slot]
+    vars_grads = {}
+    for v in tf.trainable_variables():
+        vars_grads[v.name] = [v, None, None]
+    for g, v in grads:
+        vars_grads[v.name][1] = g
+        vars_grads[v.name][2] = opt.get_slot(v, 'accumulator')
+
+    # now make summaries
+    ret = []
+    for vname, (v, g, a) in vars_grads.items():
+
+        if g is None:
+            continue
+
+        if isinstance(g, tf.IndexedSlices):
+            # a sparse gradient - only take norm of params that are updated
+            values = tf.gather(v, g.indices)
+            updates = lr * g.values
+            if a is not None:
+                updates /= tf.sqrt(tf.gather(a, g.indices))
+        else:
+            values = v
+            updates = lr * g
+            if a is not None:
+                updates /= tf.sqrt(a)
+
+        values_norm = tf.sqrt(tf.reduce_sum(v * v)) + 1.0e-7
+        updates_norm = tf.sqrt(tf.reduce_sum(updates * updates))
+        ret.append(
+                tf.summary.scalar('UPDATE/' + vname.replace(":", "_"), updates_norm / values_norm))
+
+    return ret
+
+def _deduplicate_indexed_slices(values, indices):
+    """Sums `values` associated with any non-unique `indices`.
+    Args:
+      values: A `Tensor` with rank >= 1.
+      indices: A one-dimensional integer `Tensor`, indexing into the first
+      dimension of `values` (as in an IndexedSlices object).
+    Returns:
+      A tuple of (`summed_values`, `unique_indices`) where `unique_indices` is a
+      de-duplicated version of `indices` and `summed_values` contains the sum of
+      `values` slices associated with each unique index.
+    """
+    unique_indices, new_index_positions = tf.unique(indices)
+    summed_values = tf.unsorted_segment_sum(
+      values, new_index_positions,
+      tf.shape(unique_indices)[0])
+    return (summed_values, unique_indices)
+
+
 def _get_feed_dict_from_X(X, start, end, model, bidirectional, args=None):
     feed_dict = {}
     token_ids = X['token_ids'][start:end]
@@ -588,8 +702,9 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
         train_perplexity = tf.get_variable(
             'train_perplexity', [],
             initializer=tf.constant_initializer(0.0), trainable=False)
-        for k in range(1):
-            with tf.device('/gpu:0'):
+        norm_summaries = []
+        for k in range(n_gpus):
+            with tf.device('/gpu:%d' % k):
                 with tf.variable_scope('lm', reuse=k > 0):
                     # calculate the loss for one model replica and get
                     #   lstm states
@@ -601,18 +716,51 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
                         loss * options['unroll_steps'],
                         aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE,
                     )
-
+                    tower_grads.append(grads)
                     # keep track of loss across all GPUs
                     train_perplexity += loss
 
         # calculate the mean of each gradient across all GPUs
-        grads2, norm_summary_ops = clip_grads(grads, options, True, global_step)
+        grads = average_gradients(tower_grads, options['batch_size'], options)
+        grads, norm_summary_ops = clip_grads(grads, options, True, global_step)
+        norm_summaries.extend(norm_summary_ops)
 
         # log the training perplexity
         train_perplexity = tf.exp(train_perplexity / n_gpus)
+        perplexity_summmary = tf.summary.scalar(
+            'train_perplexity', train_perplexity)
+
+        # some histogram summaries.  all models use the same parameters
+        # so only need to summarize one
+        histogram_summaries = [
+            tf.summary.histogram('token_embedding', models[0].embedding)
+        ]
+        # tensors of the output from the LSTM layer
+        lstm_out = tf.get_collection('lstm_output_embeddings')
+        histogram_summaries.append(
+                tf.summary.histogram('lstm_embedding_0', lstm_out[0]))
+        if options.get('bidirectional', False):
+            # also have the backward embedding
+            histogram_summaries.append(
+                tf.summary.histogram('lstm_embedding_1', lstm_out[1]))
 
         # apply the gradients to create the training operation
-        train_op = opt.apply_gradients(grads2)
+        train_op = opt.apply_gradients(grads, global_step=global_step)
+
+        # histograms of variables
+        for v in tf.global_variables():
+            histogram_summaries.append(tf.summary.histogram(v.name.replace(":", "_"), v))
+
+        # get the gradient updates -- these aren't histograms, but we'll
+        # only update them when histograms are computed
+        histogram_summaries.extend(
+            summary_gradient_updates(grads, opt, lr))
+
+        saver = tf.train.Saver(tf.global_variables(), max_to_keep=2)
+        summary_op = tf.summary.merge(
+            [perplexity_summmary] + norm_summaries
+        )
+        hist_summary_op = tf.summary.merge(histogram_summaries)
 
         init = tf.initialize_all_variables()
 
@@ -627,7 +775,9 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             loader = tf.train.Saver()
             logger.info('load from checkpoint {}'.format(restart_ckpt_file))
             loader.restore(sess, restart_ckpt_file)
-            
+
+        summary_writer = tf.summary.FileWriter(tf_log_dir, sess.graph)
+
         # For each batch:
         # Get a batch of data from the generator. The generator will
         # yield batches of size batch_size * n_gpus that are sliced
@@ -681,7 +831,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             para = tf.trainable_variables()
             grad_vars = tf.gradients(ys=model.total_loss * options['unroll_steps'], xs=grad_vars)
             tmp = []
-            for g,v in grads2:
+            for g,v in grads:
                 if not(g is None):
                     tmp.append(g)
             grad_vars.extend(tmp)
