@@ -7,6 +7,7 @@ import time
 import json
 import re
 import pickle
+import sys
 
 import tensorflow as tf
 import numpy as np
@@ -19,6 +20,12 @@ DTYPE = 'float32'
 DTYPE_INT = 'int64'
 
 tf.logging.set_verbosity(tf.logging.INFO)
+
+def print_variable_summary():
+    import pprint
+    variables = sorted([[v.name, v.get_shape()] for v in tf.global_variables()])
+    pprint.pprint(variables)
+
 name_dict = {
   'lm/embedding/embedding:0':1,
   'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0':21,
@@ -814,84 +821,9 @@ def _get_feed_dict_from_X(X, start, end, model, char_inputs, bidirectional, args
         name = 'next_token_id' + suffix
         feed_dict[id_placeholder] = X[name][start:end]
 
-    if args and args.use_custom_samples:
-       custom_samples_array = np.zeros(
-            (args.num_steps, args.n_negative_samples_batch + 1),
-            dtype='int64')
-       custom_samples_array_r = np.zeros(
-            (args.num_steps, args.n_negative_samples_batch + 1),
-            dtype='int64')
-       custom_probabilities_array = np.zeros(
-            (args.num_steps, args.n_negative_samples_batch + 1),
-            dtype='float32')
-       for j in range(args.num_steps):
-           for k in range(args.n_negative_samples_batch + 1):
-               custom_samples_array[j][k] = k
-               custom_samples_array_r[j][k] = k
-               custom_probabilities_array[j][k] = 1.0
-           custom_samples_array[j][0] = X['next_tocken_id'][j]
-           custom_samples_array_r[j][0] = X['next_tocken_id_reverse'][j]
-       feed_dict[model.custom_samples] = custom_samples_array
-       feed_dict[model.custom_samples_reverse] = custom_samples_array_r
-       feed_dict[model.custom_probabilities] = custom_probabilities_array
-
     return feed_dict
 
 
-def clip_by_global_norm_summary(t_list, clip_norm, norm_name, variables):
-    # wrapper around tf.clip_by_global_norm that also does summary ops of norms
-
-    # compute norms
-    # use global_norm with one element to handle IndexedSlices vs dense
-    norms = [tf.global_norm([t]) for t in t_list]
-
-    # summary ops before clipping
-    summary_ops = []
-    for ns, v in zip(norms, variables):
-        name = 'norm_pre_clip/' + v.name.replace(":", "_")
-        summary_ops.append(tf.summary.scalar(name, ns))
-
-    # clip 
-    clipped_t_list, tf_norm = tf.clip_by_global_norm(t_list, clip_norm)
-
-    # summary ops after clipping
-    norms_post = [tf.global_norm([t]) for t in clipped_t_list]
-    for ns, v in zip(norms_post, variables):
-        name = 'norm_post_clip/' + v.name.replace(":", "_")
-        summary_ops.append(tf.summary.scalar(name, ns))
-
-    summary_ops.append(tf.summary.scalar(norm_name, tf_norm))
-
-    return clipped_t_list, tf_norm, summary_ops
-
-
-def clip_grads(grads, options, do_summaries, global_step):
-    # grads = [(grad1, var1), (grad2, var2), ...]
-    def _clip_norms(grad_and_vars, val, name):
-        # grad_and_vars is a list of (g, v) pairs
-        grad_tensors = [g for g, v in grad_and_vars]
-        vv = [v for g, v in grad_and_vars]
-        scaled_val = val
-        if do_summaries:
-            clipped_tensors, g_norm, so = clip_by_global_norm_summary(
-                grad_tensors, scaled_val, name, vv)
-        else:
-            so = []
-            clipped_tensors, g_norm = tf.clip_by_global_norm(
-                grad_tensors, scaled_val)
-
-        ret = []
-        for t, (g, v) in zip(clipped_tensors, grad_and_vars):
-            ret.append((t, v))
-
-        return ret, so
-
-    all_clip_norm_val = options['all_clip_norm_val']
-    ret, summary_ops = _clip_norms(grads, all_clip_norm_val, 'norm_grad')
-
-    assert len(ret) == len(grads)
-
-    return ret, summary_ops
 
 
 def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
@@ -909,17 +841,8 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             initializer=tf.constant_initializer(0), trainable=False)
 
         # set up the optimizer
-        lr = args.learning_rate
-        if args.optim == 'sgd':
-            opt = tf.train.GradientDescentOptimizer(learning_rate=lr)
-        elif args.optim == 'adam':
-            optimizer = tf.train.AdamOptimizer(
-                learning_rate=args.learning_rate)
-        elif args.optim == 'rprop':
-            optimizer = tf.train.RMSPropOptimizer(
-                learning_rate=args.learning_rate)
-        else:
-            opt = tf.train.AdagradOptimizer(learning_rate=lr,
+        lr = options.get('learning_rate', 0.2)
+        opt = tf.train.AdagradOptimizer(learning_rate=lr,
                                         initial_accumulator_value=1.0)
 
         # calculate the gradients on each GPU
@@ -945,6 +868,8 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
                     tower_grads.append(grads)
                     # keep track of loss across all GPUs
                     train_perplexity += loss
+
+        print_variable_summary()
 
         # calculate the mean of each gradient across all GPUs
         grads = average_gradients(tower_grads, options['batch_size'], options)
@@ -1030,9 +955,11 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
 
         logger.info("Training for %s epochs and %s batches" % (
             options['n_epochs'], n_batches_total))
+        sys.stdout.flush()
 
         # get the initial lstm states
         init_state_tensors = []
+
         final_state_tensors = []
         fetch_vars = []
         grad_vars = []
@@ -1068,12 +995,6 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             grad_para = tf.gradients(ys=model.total_loss * options['unroll_steps'], xs=para)
 
             i = i + 1
-
-        feed_dict = {
-            model.token_ids:
-                np.zeros([batch_size, unroll_steps], dtype=np.int64)
-            for model in models
-        }
 
         char_inputs = 'char_cnn' in options
         if char_inputs:

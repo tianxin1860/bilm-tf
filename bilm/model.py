@@ -14,13 +14,11 @@ DTYPE_INT = 'int64'
 class BidirectionalLanguageModel(object):
     def __init__(
             self,
-            # options_file: str,
-            # weight_file: str,
-            options_file,
-            weight_file,
+            options_file: str,
+            weight_file: str,
             use_character_inputs=True,
             embedding_weight_file=None,
-            max_batch_size=1024,
+            max_batch_size=128,
         ):
         '''
         Creates the language model computational graph and loads weights
@@ -251,7 +249,7 @@ class BidirectionalLanguageModelGraph(object):
     '''
     def __init__(self, options, weight_file, ids_placeholder,
                  use_character_inputs=True, embedding_weight_file=None,
-                 max_batch_size=1024):
+                 max_batch_size=128):
 
         self.options = options
         self._max_batch_size = max_batch_size

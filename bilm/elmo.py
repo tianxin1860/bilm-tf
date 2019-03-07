@@ -39,9 +39,6 @@ def weight_layers(name, bilm_ops, l2_coef=None,
     lm_embeddings = bilm_ops['lm_embeddings']
     mask = bilm_ops['mask']
 
-    # Disable the first embedding layer
-    lm_embeddings = lm_embeddings[:, 1:, :, :]
-
     n_lm_layers = int(lm_embeddings.get_shape()[1])
     lm_dim = int(lm_embeddings.get_shape()[3])
 
