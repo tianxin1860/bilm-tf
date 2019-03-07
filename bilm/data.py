@@ -4,11 +4,8 @@ import random
 
 import numpy as np
 
-# from typing import List
+from typing import List
 
-#import sys
-#reload(sys)
-#sys.setdefaultencoding('utf8')
 
 
 class Vocabulary(object):
@@ -109,13 +106,6 @@ class UnicodeCharsVocabulary(Vocabulary):
     This limits the total number of possible char ids to 256.
     To this we add 5 additional special ids: begin sentence, end sentence,
         begin word, end word and padding.
-
-    WARNING: for prediction, we add +1 to the output ids from this
-    class to create a special padding id (=0).  As a result, we suggest
-    you use the `Batcher`, `TokenBatcher`, and `LMDataset` classes instead
-    of this lower level class.  If you are using this lower level class,
-    then be sure to add the +1 appropriately, otherwise embeddings computed
-    from the pre-trained model will be useless.
     """
     def __init__(self, filename, max_word_length, **kwargs):
         super(UnicodeCharsVocabulary, self).__init__(filename, **kwargs)
@@ -167,7 +157,7 @@ class UnicodeCharsVocabulary(Vocabulary):
         word_encoded = word.encode('utf-8', 'ignore')[:(self.max_word_length-2)]
         code[0] = self.bow_char
         for k, chr_id in enumerate(word_encoded, start=1):
-            code[k] = ord(chr_id)
+            code[k] = chr_id
         code[k + 1] = self.eow_char
 
         return code
@@ -195,24 +185,21 @@ class UnicodeCharsVocabulary(Vocabulary):
 
 
 class Batcher(object):
-    ''' 
+    '''
     Batch sentences of tokenized text into character id matrices.
     '''
-    # def __init__(self, lm_vocab_file: str, max_token_length: int):
-    def __init__(self, lm_vocab_file, max_token_length):
+    def __init__(self, lm_vocab_file: str, max_token_length: int):
         '''
         lm_vocab_file = the language model vocabulary file (one line per
             token)
         max_token_length = the maximum number of characters in each token
         '''
-        max_token_length = int(max_token_length)
         self._lm_vocab = UnicodeCharsVocabulary(
             lm_vocab_file, max_token_length
         )
         self._max_token_length = max_token_length
 
-    # def batch_sentences(self, sentences: List[List[str]]):
-    def batch_sentences(self, sentences):
+    def batch_sentences(self, sentences: List[List[str]]):
         '''
         Batch the sentences as character ids
         Each sentence is a list of tokens without <s> or </s>, e.g.
@@ -237,20 +224,17 @@ class Batcher(object):
 
 
 class TokenBatcher(object):
-    ''' 
+    '''
     Batch sentences of tokenized text into token id matrices.
     '''
-
-    def __init__(self, lm_vocab_file):
-    # def __init__(self, lm_vocab_file: str):
+    def __init__(self, lm_vocab_file: str):
         '''
         lm_vocab_file = the language model vocabulary file (one line per
             token)
         '''
         self._lm_vocab = Vocabulary(lm_vocab_file)
 
-    # def batch_sentences(self, sentences: List[List[str]]):
-    def batch_sentences(self, sentences):
+    def batch_sentences(self, sentences: List[List[str]]):
         '''
         Batch the sentences as character ids
         Each sentence is a list of tokens without <s> or </s>, e.g.
@@ -400,7 +384,6 @@ class LMDataset(object):
             sentences = sentences_raw
 
         if self._shuffle_on_load:
-            print('shuffle sentences')
             random.shuffle(sentences)
 
         ids = [self.vocab.encode(sentence, self._reverse)
@@ -469,8 +452,4 @@ class BidirectionalLMDataset(object):
                 X[k + '_reverse'] = v
 
             yield X
-
-
-class InvalidNumberOfCharacters(Exception):
-    pass
 
