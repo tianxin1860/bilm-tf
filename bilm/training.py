@@ -200,10 +200,9 @@ class LanguageModel(object):
         'dim' is the hidden state size.
         Set 'dim' == 'projection_dim' to skip a projection layer.
     '''
-    def __init__(self, options, is_training, logger):
+    def __init__(self, options, is_training):
         self.options = options
         self.is_training = is_training
-        self.logger = logger
         self.bidirectional = options.get('bidirectional', False)
 
         # use word or char inputs?
@@ -493,9 +492,9 @@ class LanguageModel(object):
 
         # get the LSTM inputs
         if self.bidirectional:
-            self.lstm_inputs = [self.embedding, self.embedding_reverse]
+            lstm_inputs = [self.embedding, self.embedding_reverse]
         else:
-            self.lstm_inputs = [self.embedding]
+            lstm_inputs = [self.embedding]
 
         # now compute the LSTM outputs
         cell_clip = self.options['lstm'].get('cell_clip')
@@ -506,9 +505,8 @@ class LanguageModel(object):
         if use_skip_connections:
             print("USING SKIP CONNECTIONS")
 
-        self.lstm_outputs = []
-        self.lstm_unpack = []
-        for lstm_num, lstm_input in enumerate(self.lstm_inputs):
+        lstm_outputs = []
+        for lstm_num, lstm_input in enumerate(lstm_inputs):
             lstm_cells = []
             for i in range(n_lstm_layers):
                 if projection_dim < lstm_dim:
@@ -562,8 +560,8 @@ class LanguageModel(object):
                 self.final_lstm_state.append(final_state)
 
             # (batch_size * unroll_steps, 512)
-            lstm_output_stack = tf.stack(_lstm_output_unpacked, axis=1)
-            lstm_output_flat = tf.reshape(lstm_output_stack, [-1, projection_dim])
+            lstm_output_flat = tf.reshape(
+                tf.stack(_lstm_output_unpacked, axis=1), [-1, projection_dim])
             if self.is_training:
                 # add dropout to output
                 lstm_output_flat = tf.nn.dropout(lstm_output_flat,
@@ -571,10 +569,9 @@ class LanguageModel(object):
             tf.add_to_collection('lstm_output_embeddings',
                 _lstm_output_unpacked)
 
-            self.lstm_unpack.append(lstm_output_stack)
-            self.lstm_outputs.append(lstm_output_flat)
+            lstm_outputs.append(lstm_output_flat)
 
-        self._build_loss(self.lstm_outputs)
+        self._build_loss(lstm_outputs)
 
     def _build_loss(self, lstm_outputs):
         '''
@@ -631,8 +628,6 @@ class LanguageModel(object):
         # now calculate losses
         # loss for each direction of the LSTM
         self.individual_losses = []
-        self.losses = []
-        self.output_scores = []
 
         if self.bidirectional:
             next_ids = [self.next_token_id, self.next_token_id_reverse]
@@ -653,9 +648,7 @@ class LanguageModel(object):
                                    self.options['n_negative_samples_batch'],
                                    self.options['n_tokens_vocab'],
                                    num_true=1)
-                    #a, b, c = sampled_values
-                    #self.output_scores.append(c)
-                    self.output_scores.append(losses)
+
                 else:
                     # get the full softmax loss
                     output_scores = tf.matmul(
@@ -669,8 +662,7 @@ class LanguageModel(object):
                         logits=output_scores,
                         labels=tf.squeeze(next_token_id_flat, squeeze_dims=[1])
                     )
-                    self.output_scores.append(output_scores)
-                self.losses.append(losses)
+
             self.individual_losses.append(tf.reduce_mean(losses))
 
         # now make the total loss -- it's the mean of the individual losses
@@ -857,7 +849,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
                 with tf.variable_scope('lm', reuse=k > 0):
                     # calculate the loss for one model replica and get
                     #   lstm states
-                    model = LanguageModel(options, True, logger)
+                    model = LanguageModel(options, True)
                     loss = model.total_loss
                     models.append(model)
                     # get gradients
@@ -959,42 +951,10 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
 
         # get the initial lstm states
         init_state_tensors = []
-
         final_state_tensors = []
-        fetch_vars = []
-        grad_vars = []
-        i = 0
         for model in models:
             init_state_tensors.extend(model.init_lstm_state)
             final_state_tensors.extend(model.final_lstm_state)
-            fetch_vars.append(model.token_ids)
-            fetch_vars.append(model.token_ids_reverse)
-            fetch_vars.extend(model.lstm_inputs)
-            fetch_vars.extend(model.lstm_unpack)
-            fetch_vars.extend(model.lstm_outputs)
-            fetch_vars.extend(model.output_scores)
-            fetch_vars.extend(model.losses)
-            fetch_vars.extend(model.individual_losses)
-            grad_vars.extend(model.lstm_inputs)
-            grad_vars.extend(model.lstm_unpack)
-            grad_vars.extend(model.lstm_outputs)
-            #grad_vars.extend(model.output_scores)
-            grad_vars.extend(model.losses)
-            grad_vars.extend(model.individual_losses)
-            para = tf.trainable_variables()
-            grad_vars = tf.gradients(ys=model.total_loss * options['unroll_steps'], xs=grad_vars)
-            tmp = []
-            for g,v in grads:
-                if not(g is None):
-                    tmp.append(g)
-            grad_vars.extend(tmp)
-           
-            if args.optim == 'adagrad':
-                opt_slot = [opt.get_slot(v, 'accumulator') for v in para]
-                grad_vars.extend(opt_slot)
-            grad_para = tf.gradients(ys=model.total_loss * options['unroll_steps'], xs=para)
-
-            i = i + 1
 
         char_inputs = 'char_cnn' in options
         if char_inputs:
@@ -1033,7 +993,6 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
 
         t1 = time.time()
         data_gen = data.iter_batches(batch_size * n_gpus, unroll_steps)
-        n_batch_loss = 0.0
         for batch_no, batch in enumerate(data_gen, start=1):
 
             # slice the input in the batch for the feed_dict
@@ -1053,39 +1012,43 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
             # This runs the train_op, summaries and the "final_state_tensors"
             #   which just returns the tensors, passing in the initial
             #   state tensors, token ids and next token ids
-            fetch_vars_len = len(fetch_vars)
-            grad_vars_len = len(grad_vars)
-            grad_para_len = len(grad_para)
-            # also run the histogram summaries
-            ret = sess.run(
-                [train_op, train_perplexity] + fetch_vars + grad_vars + grad_para + 
-                                            final_state_tensors,
-                feed_dict=feed_dict
-            )
-            fetched_vars = ret[2:2 + fetch_vars_len]
-            graded_vars = ret[2 + fetch_vars_len:2 + fetch_vars_len + grad_vars_len]
-            graded_para = ret[2 + fetch_vars_len + grad_vars_len:2 + fetch_vars_len + grad_vars_len + grad_para_len]
-            init_state_values = ret[2 + fetch_vars_len + grad_vars_len + grad_para_len:]
-            def flatten(a):
-                res = [y for x in a for y in x]
-                return res
+            if batch_no % 1250 != 0:
+                ret = sess.run(
+                    [train_op, summary_op, train_perplexity] +
+                                                final_state_tensors,
+                    feed_dict=feed_dict
+                )
 
-            k = final_state_tensors
-            v = init_state_values
-            k = flatten(flatten(k))
-            v = flatten(flatten(v))
-            n_batch_loss += np.log(ret[1])
-            if batch_no % args.log_interval == 0:
-                print_debug_info(sess, logger, vars_data=(fetch_vars + k, fetched_vars + v), grad_data=(grad_vars, graded_vars), grad_para_data=(para, graded_para), args=args)
+                # first three entries of ret are:
+                #  train_op, summary_op, train_perplexity
+                # last entries are the final states -- set them to
+                # init_state_values
+                # for next batch
+                init_state_values = ret[3:]
+
+            else:
+                # also run the histogram summaries
+                ret = sess.run(
+                    [train_op, summary_op, train_perplexity, hist_summary_op] +
+                                                final_state_tensors,
+                    feed_dict=feed_dict
+                )
+                init_state_values = ret[4:]
+
+
+            if batch_no % 1250 == 0:
+                summary_writer.add_summary(ret[3], batch_no)
+            if batch_no % 100 == 0:
                 # write the summaries to tensorboard and display perplexity
-                logger.info("Batch %s, train ppl %s, smooth ppl %s" % (batch_no, np.exp(np.log(ret[1])), np.exp(n_batch_loss / args.log_interval)))
-                logger.info("Total time: %s" % (time.time() - t1))
-                n_batch_loss = 0.0
+                summary_writer.add_summary(ret[1], batch_no)
+                print("Batch %s, train_perplexity=%s" % (batch_no, ret[2]))
+                print("Total time: %s" % (time.time() - t1))
+                sys.stdout.flush()
 
-            #if batch_no > 100 and args.para_print:
-            #    exit(0)
-            if batch_no > 100 and args.detail:
-                exit(0)
+            if (batch_no % 1250 == 0) or (batch_no == n_batches_total):
+                # save the model
+                checkpoint_path = os.path.join(tf_save_dir, 'model.ckpt')
+                saver.save(sess, checkpoint_path, global_step=global_step)
 
             if batch_no == n_batches_total:
                 # done training!
@@ -1168,7 +1131,7 @@ def test(options, ckpt_file, data, batch_size=256):
             # batch is bounded above batch_size * unroll_steps
             test_options['batch_size'] = batch_size
             test_options['unroll_steps'] = 1
-            model = LanguageModel(test_options, False, logger)
+            model = LanguageModel(test_options, False)
             # we use the "Saver" class to load the variables
             loader = tf.train.Saver()
             loader.restore(sess, ckpt_file)
