@@ -1,20 +1,21 @@
 import argparse
 
-import numpy as np
+from bilm.training import train, load_vocab
+from bilm.data import BidirectionalLMDataset
 
-from bilm.training import train
-from bilm.data import BidirectionalLMDataset, Vocabulary
-import os
 
 def main(args):
     # load the vocab
-    vocab = Vocabulary(args.vocab_file)
+    vocab = load_vocab(args.vocab_file)
 
     # define the options
+    batch_size = 128  # batch size for each GPU
     n_gpus = 1
 
     # number of tokens in training data (this for 1B Word Benchmark)
-    n_train_tokens = 867616283
+    # n_train_tokens = 12242  # DuReader value
+    # n_train_tokens = 495725
+    n_train_tokens = 867493899
 
     options = {
      'bidirectional': True,
@@ -22,32 +23,21 @@ def main(args):
     
      'lstm': {
       'cell_clip': 3,
-      'dim': args.lstm_dim,
-      'n_layers': args.n_layers,
+      'dim': 4096,
+      'n_layers': 2,
       'proj_clip': 3,
-      'projection_dim': args.projection_dim,
+      'projection_dim': 512,
       'use_skip_connections': True},
-    
+
      'all_clip_norm_val': 10.0,
-    
-     'n_epochs': 10,
+
+     'n_epochs': 5,
      'n_train_tokens': n_train_tokens,
-     'batch_size': args.batch_size,
+     'batch_size': batch_size,
      'n_tokens_vocab': vocab.size,
-     'n_negative_samples_batch': args.n_negative_samples_batch,
-     'unroll_steps': args.n_steps,
-     'para_init':args.para_init,
-     'init1':args.init1,
-     'debug_rnn':args.debug_rnn,
-     'sample_softmax':args.sample_softmax,
+     'unroll_steps': 20,
+     'n_negative_samples_batch': 8000,
     }
-    if args.random_seed == 0:
-        args.random_seed = None 
-    import random
-    random.seed(args.random_seed)
-    np.random.seed(args.random_seed)
-    import tensorflow as tf
-    tf.set_random_seed(args.random_seed)
     import logging
   
     logger = logging.getLogger("lm")
@@ -63,8 +53,8 @@ def main(args):
     logger.info(str(options))
 
     prefix = args.train_prefix
-    data = BidirectionalLMDataset(prefix, vocab, test=(not args.shuffle),
-                                      shuffle_on_load=args.shuffle)
+    data = BidirectionalLMDataset(prefix, vocab, test=False,
+                                  shuffle_on_load=True)
 
     tf_save_dir = args.save_dir
     tf_log_dir = args.save_dir

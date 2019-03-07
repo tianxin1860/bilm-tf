@@ -556,12 +556,7 @@ class LanguageModel(object):
 
             # (batch_size * unroll_steps, 512)
             lstm_output_stack = tf.stack(_lstm_output_unpacked, axis=1)
-            if self.options['debug_rnn']:
-                # refer to rnn_cell_impl.py start maybe be wrong
-                start = (n_lstm_layers-1)*projection_dim
-                lstm_output_flat = tf.reshape(lstm_output_stack[:, :, start:start+projection_dim], [-1, projection_dim])
-            else:
-                lstm_output_flat = tf.reshape(lstm_output_stack, [-1, projection_dim])
+            lstm_output_flat = tf.reshape(lstm_output_stack, [-1, projection_dim])
             if self.is_training:
                 # add dropout to output
                 lstm_output_flat = tf.nn.dropout(lstm_output_flat,
@@ -1238,6 +1233,9 @@ def test(options, ckpt_file, data, batch_size=256):
     '''
 
     bidirectional = options.get('bidirectional', False)
+    char_inputs = 'char_cnn' in options
+    if char_inputs:
+        max_chars = options['char_cnn']['max_characters_per_token']
 
     unroll_steps = 1
 
