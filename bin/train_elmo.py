@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import argparse
 
 from bilm.training import train, load_vocab
@@ -19,8 +21,8 @@ def main(args):
 
     options = {
      'bidirectional': True,
-     'dropout': args.dropout,
-    
+     'dropout': 0.1,
+
      'lstm': {
       'cell_clip': 3,
       'dim': 4096,
@@ -38,19 +40,6 @@ def main(args):
      'unroll_steps': 20,
      'n_negative_samples_batch': 8000,
     }
-    import logging
-  
-    logger = logging.getLogger("lm")
-    logger.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    #formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    
-    logger.info(str(args))
-    logger.info(str(options))
 
     prefix = args.train_prefix
     data = BidirectionalLMDataset(prefix, vocab, test=False,
@@ -58,37 +47,14 @@ def main(args):
 
     tf_save_dir = args.save_dir
     tf_log_dir = args.save_dir
-    train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger, restart_ckpt_file=args.load_dir, args=args)
+    train(options, data, n_gpus, tf_save_dir, tf_log_dir)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--save_dir', help='Location of checkpoint files',default='output')
-    parser.add_argument('--load_dir', help='Location of checkpoint files')
+    parser.add_argument('--save_dir', help='Location of checkpoint files')
     parser.add_argument('--vocab_file', help='Vocabulary file')
     parser.add_argument('--train_prefix', help='Prefix for train files')
-    parser.add_argument('--para_print', action='store_true')
-    parser.add_argument('--log_interval', type=int, default=100)
-    parser.add_argument('--random_seed', type=int, default=123)
-    parser.add_argument('--gpu_num', type=int, default=1)
-    parser.add_argument('--n_layers', type=int, default=2)
-    parser.add_argument('--projection_dim', type=int, default=512)
-    parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--lstm_dim', type=int, default=4096)
-    parser.add_argument('--n_negative_samples_batch', type=int, default=8000)
-    parser.add_argument('--n_steps', type=int, default=20)
-    parser.add_argument('--dropout', type=float, default=0.0)
-    parser.add_argument('--learning_rate', type=float, default=0.2)
-    parser.add_argument('--save_para_path', type=str, default='')
-    parser.add_argument('--load_para_path', type=str, default='')
-    parser.add_argument('--optim', type=str, default='adagrad')
-    parser.add_argument('--detail', action='store_true')
-    parser.add_argument('--para_init', action='store_true')
-    parser.add_argument('--debug_rnn', action='store_true')
-    parser.add_argument('--sample_softmax', action='store_true')
-    parser.add_argument('--init1', type=float, default=0.1)
-    parser.add_argument('--shuffle', type=bool, default=False)
 
     args = parser.parse_args()
     main(args)
-

@@ -6,7 +6,6 @@ import os
 import time
 import json
 import re
-import pickle
 import sys
 
 import tensorflow as tf
@@ -21,158 +20,11 @@ DTYPE_INT = 'int64'
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
+
 def print_variable_summary():
     import pprint
     variables = sorted([[v.name, v.get_shape()] for v in tf.global_variables()])
     pprint.pprint(variables)
-
-name_dict = {
-  'lm/embedding/embedding:0':1,
-  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0':21,
-  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/kernel:0':22,
-  'lm/RNN_0/rnn/multi_rnn_cell/cell_0/lstm_cell/projection/kernel:0':23,
-  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/bias:0':31,
-  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/kernel:0':32,
-  'lm/RNN_0/rnn/multi_rnn_cell/cell_1/lstm_cell/projection/kernel:0':33,
-  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/bias:0':41,
-  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/kernel:0':42,
-  'lm/RNN_1/rnn/multi_rnn_cell/cell_0/lstm_cell/projection/kernel:0':43,
-  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/bias:0':51,
-  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/kernel:0':52,
-  'lm/RNN_1/rnn/multi_rnn_cell/cell_1/lstm_cell/projection/kernel:0':53,
-  'lm/RNN_0/rnn/lstm_cell/bias:0':21,
-  'lm/RNN_0/rnn/lstm_cell/kernel:0':22,
-  'lm/RNN_0/rnn/lstm_cell/projection/kernel:0':23,
-  'lm/RNN_1/rnn/lstm_cell/bias:0':41,
-  'lm/RNN_1/rnn/lstm_cell/kernel:0':42,
-  'lm/RNN_1/rnn/lstm_cell/projection/kernel:0':43,
-
-  'lm/softmax/b:0':61,
-  'lm/softmax/W:0':62,
-}
-
-slot_dict = {}
-def init_slot():
-    global slot_dict
-    slot_dict = {}
-
-def name2slot(para_name, exact=False):
-    res = []
-    if exact:
-        if para_name in name_dict:
-            return [name_dict[para_name]]
-        else:
-            return []
-    for key_name in name_dict.keys():
-        if para_name.find(key_name) >= 0:
-            res.append(name_dict[key_name])
-    return res
-
-def update_slot(slots, p_array):
-    p_mean, p_max, p_min, p_num = p_array.mean(), p_array.max(), p_array.min(), np.prod(p_array.shape)
-    for slot in slots:
-        if slot in slot_dict:
-            s_mean, s_max, s_min, s_num = slot_dict[slot]
-            s_mean = (s_mean*s_num + p_mean*p_num) / (p_num + s_num)
-            s_max = max(s_max, p_max)
-            s_min = min(s_min, p_min)
-            s_num = p_num + s_num
-            slot_dict[slot] = [s_mean, s_max, s_min, s_num]
-        else:
-            slot_dict[slot] = [p_mean, p_max, p_min, p_num]
-
-def record_slot(logger):
-    for slot in slot_dict:
-        logger.info("slot:" + "\t".join([str(round(x, 10)) for x in [slot] + slot_dict[slot]]))
-
-def var_print(tag, p_array, p_name, name, logger, args):
-    try:
-        if isinstance(p_array,np.float32):
-            p_array=np.array([p_array]) 
-        if not isinstance(p_array, np.ndarray):
-            p_array = p_array.values
-        param_num = np.prod(p_array.shape)
-    except:
-        import pdb; pdb.set_trace()
-        logger.info('var:{} {} type {} not surpported'.format(p_name, name, type(p_array)))
-        return
-
-    p_array3 = np.multiply(np.multiply(p_array, p_array), p_array)
-    logger.info(tag + ": {0} ({1}),  l3={2} sum={3}  max={4}  min={5} mean={6} num={7} {8}".format(p_name, name, p_array3.sum(), p_array.sum(), p_array.max(), p_array.min(), p_array.mean(), p_array.shape, param_num))
-    if args.detail:
-        logger.info(" ".join([tag + "[", p_name, '] shape [', str(p_array.shape), ']', str(p_array)]))
-
-def print_debug_info(sess, logger, vars_data=None, grad_data=None, grad_para_data=None, args=None):
-    if not args.para_print:
-        return
-    if vars_data:
-        vars, fetched_vars = vars_data
-        for var, fetched_var in zip(vars, fetched_vars):
-            shape = var.get_shape()
-            p_array = fetched_var
-            variable_parameters = 1
-            for dim in shape:
-                variable_parameters *= dim.value
-            var_print('var', p_array, var.name, var.name, logger, args)
-    if grad_data:
-        grad_vars, graded_vars = grad_data
-        for grad, graded_var in zip(grad_vars, graded_vars):
-            try:
-                shape = grad.get_shape()
-            except:
-                logger.info('grad {} failed'.format(grad.name))
-                continue
-            p_array = graded_var
-            variable_parameters = 1
-            for dim in shape:
-                variable_parameters *= dim.value
-            var_print('grad', p_array, grad.name, grad.name, logger, args)
-    if grad_para_data:
-        grad_vars, graded_vars = grad_para_data
-        for grad, graded_var in zip(grad_vars, graded_vars):
-            try:
-                shape = grad.get_shape()
-            except:
-                logger.info('grad para {} failed'.format(grad.name))
-                continue
-            p_array = graded_var
-            variable_parameters = 1
-            for dim in shape:
-                variable_parameters *= dim.value
-            var_print('grad para', p_array, grad.name, grad.name, logger, args)
-
-    init_slot()
-    total_parameters = 0
-    parameters_string = ""
-    
-    for variable in tf.trainable_variables():
-        shape = variable.get_shape()
-        p_array = sess.run(variable.name)
-        slots = name2slot(variable.name)
-        if slots:
-            update_slot(slots, p_array)
-        variable_parameters = 1
-        for dim in shape:
-            variable_parameters *= dim.value
-        total_parameters += variable_parameters
-        var_print('para', p_array, variable.name, variable.name, logger, args)
-    record_slot(logger)
-    logger.info("Total %d variables, %s params" % (len(tf.trainable_variables()), "{:,}".format(total_parameters)))
-
-def save_var(p_array, name, logger, args):
-    if args.save_para_path:
-        if name2slot(name, exact=True):
-            new_name = 'slot_' + str(name2slot(name, exact=True)[0])
-        else:
-            new_name = name.replace('/', '%')
-        with open(os.path.join(args.save_para_path, new_name + '.data'), 'wb') as fout:
-            pickle.dump(p_array, fout)
-            logger.info('saved {} to {}'.format(name, new_name))
-
-def save_para(sess, logger, args=None):
-    for variable in tf.trainable_variables():
-        p_array = sess.run(variable.name)
-        save_var(p_array, variable.name, logger, args)
 
 
 class LanguageModel(object):
@@ -786,7 +638,7 @@ def _deduplicate_indexed_slices(values, indices):
     return (summed_values, unique_indices)
 
 
-def _get_feed_dict_from_X(X, start, end, model, char_inputs, bidirectional, args=None):
+def _get_feed_dict_from_X(X, start, end, model, char_inputs, bidirectional):
     feed_dict = {}
     if not char_inputs:
         token_ids = X['token_ids'][start:end]
@@ -816,14 +668,11 @@ def _get_feed_dict_from_X(X, start, end, model, char_inputs, bidirectional, args
     return feed_dict
 
 
+def train(options, data, n_gpus, tf_save_dir, tf_log_dir,
+          restart_ckpt_file=None):
 
-
-def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
-          restart_ckpt_file=None, args=None):
-    logger.info(str(args))
-    logger.info(str(options))
     # not restarting so save the options
-    if restart_ckpt_file is None and tf_save_dir:
+    if restart_ckpt_file is None:
         with open(os.path.join(tf_save_dir, 'options.json'), 'w') as fout:
             fout.write(json.dumps(options))
 
@@ -916,7 +765,6 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
         # load the checkpoint data if needed
         if restart_ckpt_file is not None:
             loader = tf.train.Saver()
-            logger.info('load from checkpoint {}'.format(restart_ckpt_file))
             loader.restore(sess, restart_ckpt_file)
 
         summary_writer = tf.summary.FileWriter(tf_log_dir, sess.graph)
@@ -936,16 +784,7 @@ def train(options, data, n_gpus, tf_save_dir, tf_log_dir, logger,
         n_tokens_per_batch = batch_size * unroll_steps * n_gpus
         n_batches_per_epoch = int(n_train_tokens / n_tokens_per_batch)
         n_batches_total = options['n_epochs'] * n_batches_per_epoch
-        print_debug_info(sess, logger, args=args)
-        if tf_save_dir:
-            saver = tf.train.Saver(tf.global_variables(), max_to_keep=2)
-            checkpoint_path = os.path.join(tf_save_dir, 'model_test.ckpt')
-            logger.info('save to checkpoint {}'.format(checkpoint_path))
-            saver.save(sess, checkpoint_path, global_step=0)
-
-        save_para(sess, logger, args)
-
-        logger.info("Training for %s epochs and %s batches" % (
+        print("Training for %s epochs and %s batches" % (
             options['n_epochs'], n_batches_total))
         sys.stdout.flush()
 
@@ -1194,11 +1033,11 @@ def test(options, ckpt_file, data, batch_size=256):
             total_loss += loss
             avg_perplexity = np.exp(total_loss / batch_no)
 
-            logger.info("batch=%s, batch_perplexity=%s, avg_perplexity=%s, time=%s" %
+            print("batch=%s, batch_perplexity=%s, avg_perplexity=%s, time=%s" %
                 (batch_no, batch_perplexity, avg_perplexity, time.time() - t1))
 
     avg_loss = np.mean(batch_losses)
-    logger.info("FINSIHED!  AVERAGE PERPLEXITY = %s" % np.exp(avg_loss))
+    print("FINSIHED!  AVERAGE PERPLEXITY = %s" % np.exp(avg_loss))
 
     return np.exp(avg_loss)
 
