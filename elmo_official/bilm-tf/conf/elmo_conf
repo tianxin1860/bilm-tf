@@ -1,0 +1,29 @@
+task_name="conclusion_pretrain_elmo_tf_8gpu_tianxin04"
+submitter="tianxin04"
+hdfs_path="afs://xingtian.afs.baidu.com:9902"
+ugi="NLP_KM_Data,NLP_km_2018"
+hdfs_output="/user/NLP_KM_Data/tianxin04/elmo/"
+#slurm_train_files_dir="afs://xingtian.afs.baidu.com:9902/user/NLP_KM_Data/tianxin04/train_data/train_data_baike_v6_std"
+slurm_train_files_dir="afs://xingtian.afs.baidu.com:9902/user/NLP_KM_Data/tianxin04/train_data/baike_mini/"
+test_data_dir="./package/baike_mini/dev/sentence_file_*"
+test_file=""
+queue="yq01-p40-3-8"
+#queue="yq01-p40-4-8"
+#queue="yq01-v100-box-nlp-1-8"
+#nodes=4
+#nodes=2
+nodes=1
+walltime="0"
+
+vocab_path="./package/vocabulary_min5k.txt"
+
+#model_based
+lr_rate=0.2
+droupout=0.1
+
+#train config
+#dev_interval=10000
+dev_interval=1000
+
+# big config
+HGCP_CLIENR_BIN="/home/ssd3/tianxin04/share/software-install/HGCP_client/bin"
